@@ -9,6 +9,12 @@ final class AuthViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var isLoading = false
 
+    private let userRepository: UserRepository
+
+    init(userRepository: UserRepository = FirestoreUserRepository()) {
+        self.userRepository = userRepository
+    }
+
     func signIn() async {
         errorMessage = nil
         isLoading = true
@@ -37,6 +43,11 @@ final class AuthViewModel: ObservableObject {
             let changeRequest = result.user.createProfileChangeRequest()
             changeRequest.displayName = displayName
             try await changeRequest.commitChanges()
+
+            // AppState's auth-state listener may have already created the Firestore
+            // user doc with a fallback name (it can fire before commitChanges above
+            // finishes). Explicitly overwrite it now that we know the real name.
+            try? await userRepository.updateDisplayName(uid: result.user.uid, displayName: displayName)
         } catch {
             errorMessage = friendlyMessage(for: error)
         }

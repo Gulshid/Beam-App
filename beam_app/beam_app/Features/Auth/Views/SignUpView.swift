@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SignUpView: View {
     @StateObject private var viewModel = AuthViewModel()
+    @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -36,6 +37,7 @@ struct SignUpView: View {
                     Task {
                         await viewModel.signUp()
                         if viewModel.errorMessage == nil {
+                            await appState.refreshCurrentUser()
                             dismiss()
                         }
                     }
