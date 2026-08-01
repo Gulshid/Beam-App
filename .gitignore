@@ -1,0 +1,35 @@
+# Secrets — never commit these
+GoogleService-Info.plist
+google-services.json
+*.p8
+*.p12
+*.mobileprovision
+Secrets.swift
+Secrets.plist
+Config.plist
+.env
+.env.*
+
+# Xcode
+xcuserdata/
+*.xcuserstate
+*.xcuserdatad/
+build/
+DerivedData/
+*.moved-aside
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# CocoaPods
+Pods/
+
+# Carthage
+Carthage/Build/
+
+# macOS
+.DS_Store
