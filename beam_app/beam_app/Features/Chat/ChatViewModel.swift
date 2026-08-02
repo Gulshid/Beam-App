@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 @MainActor
 final class ChatViewModel: ObservableObject {
@@ -11,28 +12,77 @@ final class ChatViewModel: ObservableObject {
     let conversationId: String
     private let chatRepository: ChatRepository
     private let mediaRepository: MediaRepository
+    private let localStore: SwiftDataStore
     private var observeTask: Task<Void, Never>?
+    private var reachabilityCancellable: AnyCancellable?
     private var currentUserId: String = ""
+    private var wasOffline = false
 
     init(
         conversationId: String,
         chatRepository: ChatRepository = FirestoreChatRepository(),
-        mediaRepository: MediaRepository = CloudinaryMediaRepository()
+        mediaRepository: MediaRepository = CloudinaryMediaRepository(),
+        localStore: SwiftDataStore = .shared
     ) {
         self.conversationId = conversationId
         self.chatRepository = chatRepository
         self.mediaRepository = mediaRepository
+        self.localStore = localStore
     }
 
     /// - Parameter currentUserId: needed so we know which messages are "incoming" and can be
     ///   advanced from sent -> delivered -> read as this device receives/views them.
     func start(currentUserId: String) {
         self.currentUserId = currentUserId
+
+        // Cold-launch / offline: paint whatever's cached instantly, before Firestore's
+        // listener has had a chance to (re)connect.
+        Task {
+            let cached = await localStore.fetchCachedMessages(conversationId: conversationId)
+            if messages.isEmpty && !cached.isEmpty {
+                messages = cached
+            }
+        }
+
         observeTask?.cancel()
         observeTask = Task {
             for await updated in chatRepository.observeMessages(conversationId: conversationId) {
                 self.reconcile(with: updated)
+                await self.localStore.upsertMessages(updated, conversationId: conversationId)
                 await self.advanceIncomingMessageStatuses(updated)
+            }
+        }
+
+        // As soon as connectivity flips back on, resume anything left in "sending"
+        // (covers both "was offline when send was tapped" and "app got killed mid-send").
+        wasOffline = !Reachability.shared.isOnline
+        reachabilityCancellable = Reachability.shared.$isOnline
+            .removeDuplicates()
+            .sink { [weak self] isOnline in
+                guard let self else { return }
+                if isOnline && self.wasOffline {
+                    Task { await self.retryPendingMessages() }
+                }
+                self.wasOffline = !isOnline
+            }
+    }
+
+    /// Re-sends anything still marked `.sending` in the local cache. `Message.id` is
+    /// generated client-side and reused as the Firestore document id, so replaying the
+    /// same message is an idempotent overwrite rather than a duplicate send.
+    private func retryPendingMessages() async {
+        let pending = await localStore.fetchPendingMessages(conversationId: conversationId)
+        for message in pending {
+            do {
+                try await chatRepository.sendMessage(message)
+                await localStore.updateMessageStatus(id: message.id, status: .sent)
+                if let index = messages.firstIndex(where: { $0.id == message.id }) {
+                    messages[index].status = .sent
+                }
+            } catch {
+                // Still offline, or a real failure — either way it stays "sending" and
+                // gets picked up again on the next reconnect.
+                print("retryPendingMessages error: \(error)")
             }
         }
     }
@@ -85,6 +135,7 @@ final class ChatViewModel: ObservableObject {
 
     func stop() {
         observeTask?.cancel()
+        reachabilityCancellable?.cancel()
     }
 
     /// Uploads a picked/recorded photo, video, or voice clip and sends it as a message.
@@ -101,7 +152,23 @@ final class ChatViewModel: ObservableObject {
 
         var message = Message.mediaDraft(conversationId: conversationId, senderId: senderId, type: type, duration: duration)
         messages.append(message)
+        await localStore.upsertMessages([message], conversationId: conversationId)
         uploadProgress[message.id] = 0
+
+        // Media isn't queued for background retry the way text is (that would mean
+        // holding raw photo/video/audio bytes in the SwiftData cache, which the
+        // blueprint calls out as a BackgroundTasks-driven upload queue for later —
+        // see §6). For now, offline just fails fast instead of hanging on a request
+        // that can't succeed.
+        guard Reachability.shared.isOnline else {
+            message.status = .failed
+            if let index = messages.firstIndex(where: { $0.id == message.id }) {
+                messages[index] = message
+            }
+            await localStore.updateMessageStatus(id: message.id, status: .failed)
+            uploadProgress[message.id] = nil
+            return
+        }
 
         do {
             let result = try await mediaRepository.upload(data: data, kind: kind) { [weak self] fraction in
@@ -114,11 +181,13 @@ final class ChatViewModel: ObservableObject {
                 messages[index] = message
             }
             try await chatRepository.sendMessage(message)
+            await localStore.updateMessageStatus(id: message.id, status: .sent)
         } catch {
             print("sendMedia error: \(error)")
             if let index = messages.firstIndex(where: { $0.id == message.id }) {
                 messages[index].status = .failed
             }
+            await localStore.updateMessageStatus(id: message.id, status: .failed)
         }
         uploadProgress[message.id] = nil
     }
@@ -133,18 +202,29 @@ final class ChatViewModel: ObservableObject {
 
         let message = Message.draft(conversationId: conversationId, senderId: senderId, text: trimmed)
 
-        // Optimistic local echo: show it instantly instead of waiting on the
-        // realtime listener round-trip.
+        // Optimistic local echo: show it instantly instead of waiting on the realtime
+        // listener round-trip. Also persisted to SwiftData right away so it survives an
+        // app kill before the Firestore write lands — or before it even gets a chance to
+        // run, if we're offline.
         messages.append(message)
+        await localStore.upsertMessages([message], conversationId: conversationId)
+
+        guard Reachability.shared.isOnline else {
+            // Leave it at "sending" — the reachability observer in start() retries it
+            // as soon as the network comes back.
+            return
+        }
 
         do {
             try await chatRepository.sendMessage(message)
+            await localStore.updateMessageStatus(id: message.id, status: .sent)
         } catch {
             print("sendMessage error: \(error)")
             // Reflect the failure on the bubble itself rather than losing it silently.
             if let index = messages.firstIndex(where: { $0.id == message.id }) {
                 messages[index].status = .failed
             }
+            await localStore.updateMessageStatus(id: message.id, status: .failed)
             // Restore the draft so the user doesn't lose what they typed.
             draftText = trimmed
         }

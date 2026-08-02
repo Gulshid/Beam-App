@@ -10,21 +10,35 @@ final class ConversationListViewModel: ObservableObject {
 
     private let chatRepository: ChatRepository
     private let userRepository: UserRepository
+    private let localStore: SwiftDataStore
     private var observeTask: Task<Void, Never>?
 
     init(
         chatRepository: ChatRepository = FirestoreChatRepository(),
-        userRepository: UserRepository = FirestoreUserRepository()
+        userRepository: UserRepository = FirestoreUserRepository(),
+        localStore: SwiftDataStore = .shared
     ) {
         self.chatRepository = chatRepository
         self.userRepository = userRepository
+        self.localStore = localStore
     }
 
     func start(currentUserId: String) {
+        // Cold-launch / offline: show cached conversations instantly, before Firestore's
+        // listener has had a chance to (re)connect.
+        Task {
+            let cached = await localStore.fetchCachedConversations()
+            if conversations.isEmpty && !cached.isEmpty {
+                conversations = cached
+                await loadParticipantNames(for: cached, currentUserId: currentUserId)
+            }
+        }
+
         observeTask?.cancel()
         observeTask = Task {
             for await updated in chatRepository.observeConversations(forUserId: currentUserId) {
                 self.conversations = updated
+                await self.localStore.upsertConversations(updated)
                 await self.loadParticipantNames(for: updated, currentUserId: currentUserId)
             }
         }

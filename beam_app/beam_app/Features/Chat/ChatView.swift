@@ -4,6 +4,7 @@ struct ChatView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var viewModel: ChatViewModel
     @StateObject private var voiceRecorderVM = VoiceRecorderViewModel()
+    @ObservedObject private var reachability = Reachability.shared
     @State private var showMediaPicker = false
     @State private var isRecording = false
 
@@ -13,6 +14,15 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if !reachability.isOnline {
+                Text("Offline — messages will send once you're back online")
+                    .font(.caption)
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(6)
+                    .background(.orange)
+            }
+
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 8) {
