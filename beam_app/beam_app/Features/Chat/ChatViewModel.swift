@@ -207,6 +207,14 @@ final class ChatViewModel: ObservableObject {
                 try await chatRepository.updateMessageStatuses(
                     conversationId: conversationId, messageIds: toDeliver, status: .delivered
                 )
+                // Without this pause, when the recipient already has the chat open
+                // ("online"), the read-write below fires within milliseconds of this
+                // one — both updates reach the server close enough together that the
+                // sender's listener only ever gets invoked with the *final* state and
+                // never renders the gray "delivered" double-tick at all, jumping
+                // straight from one tick to blue. Give it a beat to actually land and
+                // be observed as its own snapshot first.
+                try? await Task.sleep(nanoseconds: 500_000_000)
             } catch {
                 // If this prints "Missing or insufficient permissions", your Firestore
                 // security rules only allow a message's sender to update it — the

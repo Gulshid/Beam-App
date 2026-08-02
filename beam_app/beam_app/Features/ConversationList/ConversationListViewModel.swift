@@ -18,6 +18,8 @@ final class ConversationListViewModel: ObservableObject {
     private var observeTask: Task<Void, Never>?
     /// One listener per visible conversation — see `syncTypingObservers`.
     private var typingObserveTasks: [String: Task<Void, Never>] = [:]
+    /// One listener per visible conversation — see `syncDeliveryObservers`.
+    private var deliveryObserveTasks: [String: Task<Void, Never>] = [:]
 
     init(
         chatRepository: ChatRepository = FirestoreChatRepository(),
@@ -47,6 +49,7 @@ final class ConversationListViewModel: ObservableObject {
                 await self.localStore.upsertConversations(updated)
                 await self.loadParticipantNames(for: updated, currentUserId: currentUserId)
                 self.syncTypingObservers(for: updated, currentUserId: currentUserId)
+                self.syncDeliveryObservers(for: updated, currentUserId: currentUserId)
             }
         }
     }
@@ -55,6 +58,8 @@ final class ConversationListViewModel: ObservableObject {
         observeTask?.cancel()
         for task in typingObserveTasks.values { task.cancel() }
         typingObserveTasks.removeAll()
+        for task in deliveryObserveTasks.values { task.cancel() }
+        deliveryObserveTasks.removeAll()
     }
 
     /// Keeps one `observeTypingUsers` listener running per conversation currently in
@@ -79,6 +84,42 @@ final class ConversationListViewModel: ObservableObject {
                         self.typingConversationIds.remove(id)
                     } else {
                         self.typingConversationIds.insert(id)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Keeps one `observeMessages` listener running per conversation currently in the
+    /// list, bumping any incoming message still sitting at `.sent` to `.delivered`.
+    /// This is deliberately separate from `ChatViewModel.advanceIncomingMessageStatuses`:
+    /// that one only runs while the specific chat thread is open (and handles the
+    /// delivered -> read hop too), which meant a message stayed on a single tick until
+    /// the recipient opened that exact conversation — even with the app open and this
+    /// list on screen. "Delivered" should mean "reached this device while the app is
+    /// running", not "the recipient opened this exact thread", so it's tracked here
+    /// too. Same one-listener-per-row tradeoff as `syncTypingObservers` above.
+    private func syncDeliveryObservers(for conversations: [Conversation], currentUserId: String) {
+        let currentIds = Set(conversations.map(\.id))
+
+        for (id, task) in deliveryObserveTasks where !currentIds.contains(id) {
+            task.cancel()
+            deliveryObserveTasks.removeValue(forKey: id)
+        }
+
+        for id in currentIds where deliveryObserveTasks[id] == nil {
+            deliveryObserveTasks[id] = Task {
+                for await messages in self.chatRepository.observeMessages(conversationId: id) {
+                    let toDeliver = messages
+                        .filter { $0.senderId != currentUserId && $0.status == .sent }
+                        .map(\.id)
+                    guard !toDeliver.isEmpty else { continue }
+                    do {
+                        try await self.chatRepository.updateMessageStatuses(
+                            conversationId: id, messageIds: toDeliver, status: .delivered
+                        )
+                    } catch {
+                        print("markDelivered (list) error: \(error)")
                     }
                 }
             }
