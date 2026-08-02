@@ -43,6 +43,16 @@ actor SwiftDataStore {
         return ((try? modelContext.fetch(descriptor)) ?? []).map { $0.toDomain() }
     }
 
+    /// Called right after a user deletes a chat, so the row doesn't briefly
+    /// reappear from cache on the next cold launch before the server confirms it's
+    /// filtered out of `observeConversations`.
+    func deleteCachedConversation(id: String) {
+        let descriptor = FetchDescriptor<CachedConversation>(predicate: #Predicate { $0.id == id })
+        guard let existing = try? modelContext.fetch(descriptor).first else { return }
+        modelContext.delete(existing)
+        try? modelContext.save()
+    }
+
     // MARK: - Messages
 
     func upsertMessages(_ messages: [Message], conversationId: String) {

@@ -6,6 +6,7 @@ struct ConversationListView: View {
     @State private var showingNewChat = false
     @State private var showingNewGroup = false
     @State private var navigationPath = NavigationPath()
+    @State private var conversationPendingDelete: Conversation?
 
     var body: some View {
         NavigationStack(path: $navigationPath) {
@@ -26,6 +27,20 @@ struct ConversationListView: View {
                                 unreadCount: conversation.unreadCount(for: appState.currentUser?.id ?? ""),
                                 isTyping: viewModel.typingConversationIds.contains(conversation.id)
                             )
+                        }
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) {
+                                conversationPendingDelete = conversation
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                conversationPendingDelete = conversation
+                            } label: {
+                                Label("Delete Chat", systemImage: "trash")
+                            }
                         }
                     }
                     .listStyle(.plain)
@@ -79,6 +94,28 @@ struct ConversationListView: View {
                     showingNewGroup = false
                     navigationPath.append(conversationId)
                 }
+            }
+            .confirmationDialog(
+                "Delete this chat?",
+                isPresented: Binding(
+                    get: { conversationPendingDelete != nil },
+                    set: { if !$0 { conversationPendingDelete = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Delete Chat", role: .destructive) {
+                    guard let conversation = conversationPendingDelete,
+                          let currentUserId = appState.currentUser?.id else { return }
+                    Task {
+                        await viewModel.deleteConversation(conversation.id, currentUserId: currentUserId)
+                    }
+                    conversationPendingDelete = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    conversationPendingDelete = nil
+                }
+            } message: {
+                Text("This only removes it from your chat list. If they message you again, it'll come back.")
             }
         }
         .task {

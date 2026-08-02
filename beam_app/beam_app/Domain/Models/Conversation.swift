@@ -16,6 +16,12 @@ struct Conversation: Identifiable, Codable, Equatable {
     /// defaulting to `[:]`) so conversations written before this field existed still
     /// decode cleanly instead of failing `.data(as:)` entirely.
     var unreadCounts: [String: Int]? = nil
+    /// Uids that have "deleted" this conversation from their own chat list.
+    /// WhatsApp-style soft delete: it just hides the conversation for that user
+    /// (see `FirestoreChatRepository.observeConversations`/`deleteConversation`) —
+    /// the conversation and its messages aren't actually removed, so if the other
+    /// member sends a new message the thread reappears for the deleter too.
+    var deletedFor: [String]? = nil
 
     /// For direct chats, returns the other participant's uid.
     func otherMemberId(currentUserId: String) -> String? {

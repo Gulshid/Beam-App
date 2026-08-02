@@ -24,6 +24,12 @@ protocol ChatRepository {
     /// Also used for "leave group" — the leaving user removes themselves.
     func removeMember(conversationId: String, userId: String) async throws
 
+    /// Hides the conversation from `userId`'s own chat list (WhatsApp-style: the
+    /// conversation and its messages aren't deleted, just filtered out of
+    /// `observeConversations` for this user). If the other member sends a new
+    /// message afterwards, the conversation reappears for them automatically.
+    func deleteConversation(conversationId: String, userId: String) async throws
+
     /// `memberIds` is the conversation's current member list, used to increment
     /// `unreadCounts` for everyone except the sender. Passed in rather than looked up
     /// server-side so a normal send doesn't cost an extra read — callers already have
