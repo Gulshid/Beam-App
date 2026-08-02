@@ -5,15 +5,23 @@ final class ChatViewModel: ObservableObject {
     @Published private(set) var messages: [Message] = []
     @Published var draftText = ""
     @Published private(set) var isSending = false
+    /// messageId -> 0...1 upload fraction, for messages currently uploading media.
+    @Published private(set) var uploadProgress: [String: Double] = [:]
 
     let conversationId: String
     private let chatRepository: ChatRepository
+    private let mediaRepository: MediaRepository
     private var observeTask: Task<Void, Never>?
     private var currentUserId: String = ""
 
-    init(conversationId: String, chatRepository: ChatRepository = FirestoreChatRepository()) {
+    init(
+        conversationId: String,
+        chatRepository: ChatRepository = FirestoreChatRepository(),
+        mediaRepository: MediaRepository = CloudinaryMediaRepository()
+    ) {
         self.conversationId = conversationId
         self.chatRepository = chatRepository
+        self.mediaRepository = mediaRepository
     }
 
     /// - Parameter currentUserId: needed so we know which messages are "incoming" and can be
@@ -77,6 +85,42 @@ final class ChatViewModel: ObservableObject {
 
     func stop() {
         observeTask?.cancel()
+    }
+
+    /// Uploads a picked/recorded photo, video, or voice clip and sends it as a message.
+    /// Mirrors sendDraft()'s optimistic-echo/failure pattern, plus a progress readout
+    /// for the upload itself since media transfers can take a few seconds.
+    func sendMedia(senderId: String, data: Data, kind: MediaKind, duration: Double? = nil) async {
+        let type: MessageType = {
+            switch kind {
+            case .image: return .image
+            case .video: return .video
+            case .audio: return .audio
+            }
+        }()
+
+        var message = Message.mediaDraft(conversationId: conversationId, senderId: senderId, type: type, duration: duration)
+        messages.append(message)
+        uploadProgress[message.id] = 0
+
+        do {
+            let result = try await mediaRepository.upload(data: data, kind: kind) { [weak self] fraction in
+                self?.uploadProgress[message.id] = fraction
+            }
+            message.mediaURL = result.url
+            message.duration = message.duration ?? result.duration
+            message.status = .sent
+            if let index = messages.firstIndex(where: { $0.id == message.id }) {
+                messages[index] = message
+            }
+            try await chatRepository.sendMessage(message)
+        } catch {
+            print("sendMedia error: \(error)")
+            if let index = messages.firstIndex(where: { $0.id == message.id }) {
+                messages[index].status = .failed
+            }
+        }
+        uploadProgress[message.id] = nil
     }
 
     func sendDraft(senderId: String) async {

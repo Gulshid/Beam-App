@@ -3,6 +3,10 @@ import SwiftUI
 struct MessageBubbleView: View {
     let message: Message
     let isFromCurrentUser: Bool
+    var uploadProgress: Double? = nil
+
+    @State private var isPresentingFullScreenImage = false
+    @State private var isPresentingVideoPlayer = false
 
     var body: some View {
         HStack {
@@ -35,28 +39,102 @@ struct MessageBubbleView: View {
         switch message.type {
         case .text:
             Text(message.text ?? "")
-        case .image, .video, .audio:
-            // Placeholder — Phase 2 replaces this with actual media rendering.
-            Label(placeholderLabel, systemImage: placeholderIcon)
+        case .image:
+            imageContent
+        case .video:
+            videoContent
+        case .audio:
+            audioContent
         }
     }
 
-    private var placeholderLabel: String {
-        switch message.type {
-        case .image: return "Photo"
-        case .video: return "Video"
-        case .audio: return "Voice message"
-        case .text: return ""
+    @ViewBuilder
+    private var imageContent: some View {
+        if let mediaURL = message.mediaURL, let url = URL(string: mediaURL) {
+            Button {
+                isPresentingFullScreenImage = true
+            } label: {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                    case .failure:
+                        Image(systemName: "photo").imageScale(.large)
+                    default:
+                        ProgressView()
+                    }
+                }
+                .frame(width: 220, height: 220)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+            .buttonStyle(.plain)
+            .fullScreenCover(isPresented: $isPresentingFullScreenImage) {
+                ZStack {
+                    Color.black.ignoresSafeArea()
+                    AsyncImage(url: url) { phase in
+                        if case .success(let image) = phase {
+                            image.resizable().scaledToFit()
+                        } else {
+                            ProgressView().tint(.white)
+                        }
+                    }
+                }
+                .onTapGesture { isPresentingFullScreenImage = false }
+            }
+        } else {
+            uploadingPlaceholder(icon: "photo")
         }
     }
 
-    private var placeholderIcon: String {
-        switch message.type {
-        case .image: return "photo"
-        case .video: return "video"
-        case .audio: return "waveform"
-        case .text: return ""
+    @ViewBuilder
+    private var videoContent: some View {
+        if let mediaURL = message.mediaURL, let url = URL(string: mediaURL) {
+            Button {
+                isPresentingVideoPlayer = true
+            } label: {
+                ZStack {
+                    Rectangle()
+                        .fill(.black.opacity(0.85))
+                        .frame(width: 220, height: 220)
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 44))
+                        .foregroundStyle(.white)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+            .buttonStyle(.plain)
+            .fullScreenCover(isPresented: $isPresentingVideoPlayer) {
+                VideoMessagePlayerView(url: url)
+            }
+        } else {
+            uploadingPlaceholder(icon: "video")
         }
+    }
+
+    @ViewBuilder
+    private var audioContent: some View {
+        if let mediaURL = message.mediaURL, let url = URL(string: mediaURL) {
+            AudioMessageView(url: url, duration: message.duration ?? 0, tint: isFromCurrentUser ? .white : .accentColor)
+        } else {
+            uploadingPlaceholder(icon: "waveform")
+        }
+    }
+
+    /// Shown while a photo/video/voice message's Cloudinary upload is still in flight
+    /// (mediaURL is nil until the upload resolves — see ChatViewModel.sendMedia).
+    @ViewBuilder
+    private func uploadingPlaceholder(icon: String) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.title2)
+            if let uploadProgress {
+                ProgressView(value: uploadProgress)
+                    .frame(width: 100)
+            } else {
+                ProgressView()
+            }
+        }
+        .frame(width: 120, height: 80)
     }
 
     private var bubbleColor: Color {

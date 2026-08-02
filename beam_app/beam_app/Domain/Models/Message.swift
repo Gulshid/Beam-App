@@ -39,4 +39,20 @@ struct Message: Identifiable, Codable, Equatable {
             status: .sending
         )
     }
+
+    /// Local placeholder shown immediately while a photo/video/voice message uploads.
+    /// `mediaURL` is filled in once the upload completes (see ChatViewModel.sendMedia).
+    static func mediaDraft(conversationId: String, senderId: String, type: MessageType, duration: Double? = nil) -> Message {
+        Message(
+            id: UUID().uuidString,
+            conversationId: conversationId,
+            senderId: senderId,
+            type: type,
+            text: nil,
+            mediaURL: nil,
+            duration: duration,
+            createdAt: Date(),
+            status: .sending
+        )
+    }
 }
