@@ -23,10 +23,20 @@ final class ChatViewModel: ObservableObject {
         observeTask?.cancel()
         observeTask = Task {
             for await updated in chatRepository.observeMessages(conversationId: conversationId) {
-                self.messages = updated
+                self.reconcile(with: updated)
                 await self.advanceIncomingMessageStatuses(updated)
             }
         }
+    }
+
+    /// Merges the authoritative server snapshot with any optimistic messages that
+    /// haven't been confirmed by the listener yet, matched by id (the client
+    /// generates the message id up front and uses it as the Firestore doc id, so
+    /// once the server copy arrives it always has the same id as the local one).
+    private func reconcile(with serverMessages: [Message]) {
+        let serverIds = Set(serverMessages.map(\.id))
+        let stillPending = messages.filter { $0.status == .sending && !serverIds.contains($0.id) }
+        messages = (serverMessages + stillPending).sorted { $0.createdAt < $1.createdAt }
     }
 
     /// This chat screen is open and rendering these messages, so anything the other
@@ -40,16 +50,28 @@ final class ChatViewModel: ObservableObject {
 
         let toDeliver = messages.filter { $0.senderId != currentUserId && $0.status == .sent }.map(\.id)
         if !toDeliver.isEmpty {
-            try? await chatRepository.updateMessageStatuses(
-                conversationId: conversationId, messageIds: toDeliver, status: .delivered
-            )
+            do {
+                try await chatRepository.updateMessageStatuses(
+                    conversationId: conversationId, messageIds: toDeliver, status: .delivered
+                )
+            } catch {
+                // If this prints "Missing or insufficient permissions", your Firestore
+                // security rules only allow a message's sender to update it — the
+                // recipient needs write access to bump status too. See the rules
+                // snippet in the chat notes.
+                print("markDelivered error: \(error)")
+            }
         }
 
         let toRead = messages.filter { $0.senderId != currentUserId && ($0.status == .sent || $0.status == .delivered) }.map(\.id)
         if !toRead.isEmpty {
-            try? await chatRepository.updateMessageStatuses(
-                conversationId: conversationId, messageIds: toRead, status: .read
-            )
+            do {
+                try await chatRepository.updateMessageStatuses(
+                    conversationId: conversationId, messageIds: toRead, status: .read
+                )
+            } catch {
+                print("markRead error: \(error)")
+            }
         }
     }
 
@@ -67,10 +89,18 @@ final class ChatViewModel: ObservableObject {
 
         let message = Message.draft(conversationId: conversationId, senderId: senderId, text: trimmed)
 
+        // Optimistic local echo: show it instantly instead of waiting on the
+        // realtime listener round-trip.
+        messages.append(message)
+
         do {
             try await chatRepository.sendMessage(message)
         } catch {
             print("sendMessage error: \(error)")
+            // Reflect the failure on the bubble itself rather than losing it silently.
+            if let index = messages.firstIndex(where: { $0.id == message.id }) {
+                messages[index].status = .failed
+            }
             // Restore the draft so the user doesn't lose what they typed.
             draftText = trimmed
         }
