@@ -4,6 +4,7 @@ struct ConversationListView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var viewModel = ConversationListViewModel()
     @State private var showingNewChat = false
+    @State private var showingNewGroup = false
     @State private var navigationPath = NavigationPath()
 
     var body: some View {
@@ -32,10 +33,29 @@ struct ConversationListView: View {
             .navigationDestination(for: String.self) { conversationId in
                 ChatView(conversationId: conversationId)
             }
+            .navigationDestination(for: GroupInfoRoute.self) { route in
+                GroupInfoView(
+                    conversationId: route.conversationId,
+                    currentUserId: appState.currentUser?.id ?? ""
+                ) {
+                    // Leaving a group makes both the info screen and the chat thread
+                    // behind it invalid, so pop all the way back to the list.
+                    navigationPath = NavigationPath()
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        showingNewChat = true
+                    Menu {
+                        Button {
+                            showingNewChat = true
+                        } label: {
+                            Label("New Chat", systemImage: "person")
+                        }
+                        Button {
+                            showingNewGroup = true
+                        } label: {
+                            Label("New Group", systemImage: "person.3")
+                        }
                     } label: {
                         Image(systemName: "square.and.pencil")
                     }
@@ -55,6 +75,12 @@ struct ConversationListView: View {
                             navigationPath.append(conversationId)
                         }
                     }
+                }
+            }
+            .sheet(isPresented: $showingNewGroup) {
+                GroupCreationView(currentUserId: appState.currentUser?.id ?? "") { conversationId in
+                    showingNewGroup = false
+                    navigationPath.append(conversationId)
                 }
             }
         }

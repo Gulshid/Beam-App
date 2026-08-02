@@ -4,6 +4,9 @@ struct MessageBubbleView: View {
     let message: Message
     let isFromCurrentUser: Bool
     var uploadProgress: Double? = nil
+    /// Sender's display name — passed only for group chats, and only rendered above
+    /// incoming bubbles (own messages don't need a "you" label).
+    var senderName: String? = nil
 
     @State private var isPresentingFullScreenImage = false
     @State private var isPresentingVideoPlayer = false
@@ -13,6 +16,13 @@ struct MessageBubbleView: View {
             if isFromCurrentUser { Spacer(minLength: 40) }
 
             VStack(alignment: isFromCurrentUser ? .trailing : .leading, spacing: 4) {
+                if !isFromCurrentUser, let senderName {
+                    Text(senderName)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 4)
+                }
+
                 bubbleContent
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)

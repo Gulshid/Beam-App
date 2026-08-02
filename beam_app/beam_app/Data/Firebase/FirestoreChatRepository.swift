@@ -36,6 +36,28 @@ final class FirestoreChatRepository: ChatRepository {
         }
     }
 
+    func observeConversation(conversationId: String) -> AsyncStream<Conversation?> {
+        AsyncStream { continuation in
+            let listener = conversationsCollection
+                .document(conversationId)
+                .addSnapshotListener { snapshot, error in
+                    if let error {
+                        print("observeConversation error: \(error)")
+                        return
+                    }
+                    guard let snapshot, snapshot.exists else {
+                        continuation.yield(nil)
+                        return
+                    }
+                    continuation.yield(try? snapshot.data(as: Conversation.self))
+                }
+
+            continuation.onTermination = { _ in
+                listener.remove()
+            }
+        }
+    }
+
     func observeMessages(conversationId: String) -> AsyncStream<[Message]> {
         AsyncStream { continuation in
             let listener = conversationsCollection
@@ -99,6 +121,26 @@ final class FirestoreChatRepository: ChatRepository {
         )
         try conversationsCollection.document(newConversation.id).setData(from: newConversation)
         return newConversation.id
+    }
+
+    func renameGroup(conversationId: String, title: String) async throws {
+        try await conversationsCollection.document(conversationId).setData([
+            "title": title,
+            "updatedAt": Timestamp(date: Date())
+        ], merge: true)
+    }
+
+    func addMembers(conversationId: String, memberIds: [String]) async throws {
+        try await conversationsCollection.document(conversationId).updateData([
+            "memberIds": FieldValue.arrayUnion(memberIds)
+        ])
+    }
+
+    /// Also used for "leave group": the leaving user calls this with their own uid.
+    func removeMember(conversationId: String, userId: String) async throws {
+        try await conversationsCollection.document(conversationId).updateData([
+            "memberIds": FieldValue.arrayRemove([userId])
+        ])
     }
 
     func sendMessage(_ message: Message) async throws {

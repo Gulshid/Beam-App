@@ -30,7 +30,8 @@ struct ChatView: View {
                             MessageBubbleView(
                                 message: message,
                                 isFromCurrentUser: message.senderId == appState.currentUser?.id,
-                                uploadProgress: viewModel.uploadProgress[message.id]
+                                uploadProgress: viewModel.uploadProgress[message.id],
+                                senderName: viewModel.senderName(for: message)
                             )
                             .id(message.id)
                         }
@@ -102,7 +103,17 @@ struct ChatView: View {
                 .padding(12)
             }
         }
+        .navigationTitle(viewModel.navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if viewModel.conversation?.type == .group {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    NavigationLink(value: GroupInfoRoute(conversationId: viewModel.conversationId)) {
+                        Image(systemName: "info.circle")
+                    }
+                }
+            }
+        }
         .task { viewModel.start(currentUserId: appState.currentUser?.id ?? "") }
         .onDisappear { viewModel.stop() }
         .mediaPicker(isPresented: $showMediaPicker) { data, kind in

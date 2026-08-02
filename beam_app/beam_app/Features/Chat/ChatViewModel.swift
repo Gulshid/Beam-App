@@ -8,26 +8,44 @@ final class ChatViewModel: ObservableObject {
     @Published private(set) var isSending = false
     /// messageId -> 0...1 upload fraction, for messages currently uploading media.
     @Published private(set) var uploadProgress: [String: Double] = [:]
+    /// The conversation's own metadata (type, memberIds, title) — nil until the first
+    /// snapshot arrives. Used for the nav title and to decide whether this is a group.
+    @Published private(set) var conversation: Conversation?
+    @Published private(set) var navigationTitle: String = ""
 
     let conversationId: String
     private let chatRepository: ChatRepository
     private let mediaRepository: MediaRepository
+    private let userRepository: UserRepository
     private let localStore: SwiftDataStore
     private var observeTask: Task<Void, Never>?
+    private var conversationObserveTask: Task<Void, Never>?
     private var reachabilityCancellable: AnyCancellable?
     private var currentUserId: String = ""
     private var wasOffline = false
+    /// uid -> displayName, populated for group members only (used for the sender label
+    /// shown above incoming bubbles — direct chats don't need it).
+    private var memberNames: [String: String] = [:]
 
     init(
         conversationId: String,
         chatRepository: ChatRepository = FirestoreChatRepository(),
         mediaRepository: MediaRepository = CloudinaryMediaRepository(),
+        userRepository: UserRepository = FirestoreUserRepository(),
         localStore: SwiftDataStore = .shared
     ) {
         self.conversationId = conversationId
         self.chatRepository = chatRepository
         self.mediaRepository = mediaRepository
+        self.userRepository = userRepository
         self.localStore = localStore
+    }
+
+    /// Nil for direct chats. For group chats, the display name of whoever sent this
+    /// message — shown above incoming bubbles, mirroring the usual group-chat pattern.
+    func senderName(for message: Message) -> String? {
+        guard conversation?.type == .group else { return nil }
+        return memberNames[message.senderId]
     }
 
     /// - Parameter currentUserId: needed so we know which messages are "incoming" and can be
@@ -50,6 +68,15 @@ final class ChatViewModel: ObservableObject {
                 self.reconcile(with: updated)
                 await self.localStore.upsertMessages(updated, conversationId: conversationId)
                 await self.advanceIncomingMessageStatuses(updated)
+            }
+        }
+
+        conversationObserveTask?.cancel()
+        conversationObserveTask = Task {
+            for await updated in chatRepository.observeConversation(conversationId: conversationId) {
+                guard let updated else { continue }
+                self.conversation = updated
+                await self.updateTitleAndMemberNames(updated, currentUserId: currentUserId)
             }
         }
 
@@ -83,6 +110,35 @@ final class ChatViewModel: ObservableObject {
                 // Still offline, or a real failure — either way it stays "sending" and
                 // gets picked up again on the next reconnect.
                 print("retryPendingMessages error: \(error)")
+            }
+        }
+    }
+
+    /// Resolves the nav title (group title, or the other participant's name for a
+    /// direct chat) and, for groups, backfills `memberNames` for any member not yet
+    /// looked up so incoming bubbles can show a sender label.
+    private func updateTitleAndMemberNames(_ conversation: Conversation, currentUserId: String) async {
+        switch conversation.type {
+        case .group:
+            navigationTitle = conversation.title ?? "Group Chat"
+            let missingIds = Set(conversation.memberIds).subtracting(memberNames.keys)
+            for uid in missingIds {
+                if let user = try? await userRepository.fetchUser(uid: uid) {
+                    memberNames[uid] = user.displayName
+                }
+            }
+        case .direct:
+            guard let otherId = conversation.otherMemberId(currentUserId: currentUserId) else {
+                navigationTitle = "Conversation"
+                return
+            }
+            if let cachedName = memberNames[otherId] {
+                navigationTitle = cachedName
+            } else if let user = try? await userRepository.fetchUser(uid: otherId) {
+                memberNames[otherId] = user.displayName
+                navigationTitle = user.displayName
+            } else {
+                navigationTitle = "Conversation"
             }
         }
     }
@@ -135,6 +191,7 @@ final class ChatViewModel: ObservableObject {
 
     func stop() {
         observeTask?.cancel()
+        conversationObserveTask?.cancel()
         reachabilityCancellable?.cancel()
     }
 
