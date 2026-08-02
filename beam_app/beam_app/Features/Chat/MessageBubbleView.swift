@@ -70,19 +70,41 @@ struct MessageBubbleView: View {
             Image(systemName: "clock")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-        case .sent, .delivered:
-            Image(systemName: "checkmark")
-                .font(.caption2)
+        case .sent:
+            singleCheck
+                .foregroundStyle(.secondary)
+        case .delivered:
+            doubleCheck
                 .foregroundStyle(.secondary)
         case .read:
-            Image(systemName: "checkmark")
-                .font(.caption2)
+            doubleCheck
                 .foregroundStyle(.blue)
         case .failed:
             Image(systemName: "exclamationmark.circle")
                 .font(.caption2)
                 .foregroundStyle(.red)
         }
+    }
+
+    /// Single tick: message written to the server.
+    private var singleCheck: some View {
+        Image(systemName: "checkmark")
+            .font(.caption2)
+    }
+
+    /// WhatsApp-style overlapping double tick: delivered (gray) or read (blue).
+    /// SF Symbols has no built-in "double checkmark", so two checkmarks are
+    /// offset to overlap, matching the familiar messaging-app convention.
+    private var doubleCheck: some View {
+        ZStack {
+            Image(systemName: "checkmark")
+                .font(.caption2)
+                .offset(x: -3)
+            Image(systemName: "checkmark")
+                .font(.caption2)
+                .offset(x: 3)
+        }
+        .frame(width: 16)
     }
 }
 

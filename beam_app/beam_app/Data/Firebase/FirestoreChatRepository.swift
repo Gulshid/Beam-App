@@ -9,18 +9,24 @@ final class FirestoreChatRepository: ChatRepository {
 
     func observeConversations(forUserId userId: String) -> AsyncStream<[Conversation]> {
         AsyncStream { continuation in
+            // NOTE: intentionally no `.order(by:)` here. Combining `arrayContains`
+            // with `order(by:)` on a different field requires a Firestore composite
+            // index; until that index finishes building, the listener fails with
+            // "FAILED_PRECONDITION: query requires an index" and never delivers
+            // updates again (which is why it can look like it "only works after
+            // reloading the app" — a previous cold start happened to catch it after
+            // the index was ready). Sorting client-side sidesteps the requirement.
             let listener = conversationsCollection
                 .whereField("memberIds", arrayContains: userId)
-                .order(by: "updatedAt", descending: true)
                 .addSnapshotListener { snapshot, error in
                     if let error {
                         print("observeConversations error: \(error)")
                         return
                     }
                     guard let snapshot else { return }
-                    let conversations = snapshot.documents.compactMap {
-                        try? $0.data(as: Conversation.self)
-                    }
+                    let conversations = snapshot.documents
+                        .compactMap { try? $0.data(as: Conversation.self) }
+                        .sorted { $0.updatedAt > $1.updatedAt }
                     continuation.yield(conversations)
                 }
 
@@ -118,6 +124,16 @@ final class FirestoreChatRepository: ChatRepository {
         try await conversationsCollection.document(conversationId).setData([
             "lastReadBy.\(userId)": Timestamp(date: Date())
         ], merge: true)
+    }
+
+    func updateMessageStatuses(conversationId: String, messageIds: [String], status: MessageStatus) async throws {
+        guard !messageIds.isEmpty else { return }
+        let messagesCollection = conversationsCollection.document(conversationId).collection("messages")
+        let batch = db.batch()
+        for id in messageIds {
+            batch.updateData(["status": status.rawValue], forDocument: messagesCollection.document(id))
+        }
+        try await batch.commit()
     }
 
     private func previewText(for message: Message) -> String {

@@ -16,4 +16,7 @@ protocol ChatRepository {
     func sendMessage(_ message: Message) async throws
 
     func markConversationRead(conversationId: String, userId: String) async throws
+
+    /// Batch-updates the given messages' status (e.g. sent -> delivered -> read).
+    func updateMessageStatuses(conversationId: String, messageIds: [String], status: MessageStatus) async throws
 }

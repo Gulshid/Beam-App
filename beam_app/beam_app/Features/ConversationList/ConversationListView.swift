@@ -47,7 +47,7 @@ struct ConversationListView: View {
                 }
             }
             .sheet(isPresented: $showingNewChat) {
-                NewChatSearchView { selectedUser in
+                NewChatSearchView(currentUserId: appState.currentUser?.id) { selectedUser in
                     Task {
                         guard let currentUserId = appState.currentUser?.id else { return }
                         if let conversationId = await viewModel.startConversation(with: selectedUser, currentUserId: currentUserId) {

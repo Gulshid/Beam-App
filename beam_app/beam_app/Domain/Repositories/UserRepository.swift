@@ -12,7 +12,8 @@ protocol UserRepository {
     func updateDisplayName(uid: String, displayName: String) async throws
 
     /// For "add to chat" / "new conversation" search.
-    func searchUsers(matching query: String) async throws -> [AppUser]
+    /// `excluding` is the current user's uid so they never see themselves in results.
+    func searchUsers(matching query: String, excluding currentUserId: String?) async throws -> [AppUser]
 
     func updateFCMToken(uid: String, token: String) async throws
 }

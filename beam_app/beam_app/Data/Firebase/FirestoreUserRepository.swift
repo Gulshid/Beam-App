@@ -25,7 +25,7 @@ final class FirestoreUserRepository: UserRepository {
         return try? snapshot.data(as: AppUser.self)
     }
 
-    func searchUsers(matching query: String) async throws -> [AppUser] {
+    func searchUsers(matching query: String, excluding currentUserId: String?) async throws -> [AppUser] {
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
 
         // Simple prefix search on displayName. Firestore has no native full-text search;
@@ -33,13 +33,17 @@ final class FirestoreUserRepository: UserRepository {
         let lowerBound = query.lowercased()
         let upperBound = lowerBound + "\u{f8ff}"
 
+        // Fetch one extra so filtering out the current user doesn't leave us
+        // short of results when they happen to match the prefix.
         let snapshot = try await usersCollection
             .whereField("displayNameLowercase", isGreaterThanOrEqualTo: lowerBound)
             .whereField("displayNameLowercase", isLessThanOrEqualTo: upperBound)
-            .limit(to: 20)
+            .limit(to: 21)
             .getDocuments()
 
-        return snapshot.documents.compactMap { try? $0.data(as: AppUser.self) }
+        let users = snapshot.documents.compactMap { try? $0.data(as: AppUser.self) }
+        guard let currentUserId else { return users }
+        return users.filter { $0.id != currentUserId }
     }
 
     func updateDisplayName(uid: String, displayName: String) async throws {

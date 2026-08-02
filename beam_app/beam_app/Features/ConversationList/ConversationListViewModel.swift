@@ -44,7 +44,7 @@ final class ConversationListViewModel: ObservableObject {
         return participantNames[otherId] ?? "..."
     }
 
-    func search() async {
+    func search(excluding currentUserId: String?) async {
         guard !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty else {
             searchResults = []
             return
@@ -53,7 +53,7 @@ final class ConversationListViewModel: ObservableObject {
         defer { isSearching = false }
 
         do {
-            searchResults = try await userRepository.searchUsers(matching: searchQuery)
+            searchResults = try await userRepository.searchUsers(matching: searchQuery, excluding: currentUserId)
         } catch {
             print("search error: \(error)")
             searchResults = []

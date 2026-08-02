@@ -3,6 +3,7 @@ import SwiftUI
 struct NewChatSearchView: View {
     @StateObject private var viewModel = ConversationListViewModel()
     @Environment(\.dismiss) private var dismiss
+    let currentUserId: String?
     let onSelect: (AppUser) -> Void
 
     var body: some View {
@@ -41,7 +42,7 @@ struct NewChatSearchView: View {
             }
             .searchable(text: $viewModel.searchQuery, prompt: "Search by name")
             .onChange(of: viewModel.searchQuery) {
-                Task { await viewModel.search() }
+                Task { await viewModel.search(excluding: currentUserId) }
             }
             .navigationTitle("New Chat")
             .navigationBarTitleDisplayMode(.inline)
@@ -55,5 +56,5 @@ struct NewChatSearchView: View {
 }
 
 #Preview {
-    NewChatSearchView { _ in }
+    NewChatSearchView(currentUserId: "preview-uid") { _ in }
 }

@@ -54,7 +54,7 @@ struct ChatView: View {
             .padding(12)
         }
         .navigationBarTitleDisplayMode(.inline)
-        .task { viewModel.start() }
+        .task { viewModel.start(currentUserId: appState.currentUser?.id ?? "") }
         .onDisappear { viewModel.stop() }
     }
 }
