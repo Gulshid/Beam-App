@@ -8,7 +8,7 @@ struct RootView: View {
             if appState.isLoadingSession {
                 ProgressView()
             } else if appState.currentUser != nil {
-                ConversationListView()
+                MainTabView()
             } else {
                 LoginView()
             }

@@ -1,23 +1,31 @@
 import SwiftUI
 
-struct ConversationListView: View {
+/// The Groups tab. Reuses `ConversationListViewModel` (it already streams every
+/// conversation the user belongs to) and just filters down to `.group` — a second,
+/// independent listener rather than sharing state with the Chats tab, same tradeoff
+/// the typing-indicator observers already make elsewhere in this list (see its doc
+/// comment): simplest thing that works at this app's scale.
+struct GroupsListView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var viewModel = ConversationListViewModel()
-    @State private var showingNewChat = false
     @State private var showingNewGroup = false
     @State private var navigationPath = NavigationPath()
+
+    private var groupConversations: [Conversation] {
+        viewModel.conversations.filter { $0.type == .group }
+    }
 
     var body: some View {
         NavigationStack(path: $navigationPath) {
             Group {
-                if viewModel.conversations.isEmpty {
+                if groupConversations.isEmpty {
                     ContentUnavailableView(
-                        "No conversations yet",
-                        systemImage: "bubble.left.and.bubble.right",
-                        description: Text("Tap the compose button to start a chat.")
+                        "No groups yet",
+                        systemImage: "person.3",
+                        description: Text("Tap the compose button to start a group.")
                     )
                 } else {
-                    List(viewModel.conversations) { conversation in
+                    List(groupConversations) { conversation in
                         NavigationLink(value: conversation.id) {
                             ConversationRowView(
                                 title: viewModel.displayTitle(for: conversation, currentUserId: appState.currentUser?.id ?? ""),
@@ -31,7 +39,7 @@ struct ConversationListView: View {
                     .listStyle(.plain)
                 }
             }
-            .navigationTitle("Chats")
+            .navigationTitle("Groups")
             .navigationDestination(for: String.self) { conversationId in
                 ChatView(conversationId: conversationId)
             }
@@ -47,30 +55,10 @@ struct ConversationListView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Menu {
-                        Button {
-                            showingNewChat = true
-                        } label: {
-                            Label("New Chat", systemImage: "person")
-                        }
-                        Button {
-                            showingNewGroup = true
-                        } label: {
-                            Label("New Group", systemImage: "person.3")
-                        }
+                    Button {
+                        showingNewGroup = true
                     } label: {
                         Image(systemName: "square.and.pencil")
-                    }
-                }
-            }
-            .sheet(isPresented: $showingNewChat) {
-                NewChatSearchView(currentUserId: appState.currentUser?.id) { selectedUser in
-                    Task {
-                        guard let currentUserId = appState.currentUser?.id else { return }
-                        if let conversationId = await viewModel.startConversation(with: selectedUser, currentUserId: currentUserId) {
-                            showingNewChat = false
-                            navigationPath.append(conversationId)
-                        }
                     }
                 }
             }
@@ -91,6 +79,6 @@ struct ConversationListView: View {
 }
 
 #Preview {
-    ConversationListView()
+    GroupsListView()
         .environmentObject(AppState())
 }
