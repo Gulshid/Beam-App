@@ -90,6 +90,13 @@ final class ChatViewModel: ObservableObject {
                 self.runSearch()
                 await self.localStore.upsertMessages(updated, conversationId: conversationId)
                 await self.advanceIncomingMessageStatuses(updated)
+                // This screen is open and rendering the conversation, so it's read —
+                // zero the unread badge back to 0 for this device's user. Same idea as
+                // advanceIncomingMessageStatuses above, just at the conversation level
+                // instead of per-message.
+                if !currentUserId.isEmpty {
+                    try? await self.chatRepository.markConversationRead(conversationId: self.conversationId, userId: currentUserId)
+                }
             }
         }
 
@@ -133,7 +140,7 @@ final class ChatViewModel: ObservableObject {
         let pending = await localStore.fetchPendingMessages(conversationId: conversationId)
         for message in pending {
             do {
-                try await chatRepository.sendMessage(message)
+                try await chatRepository.sendMessage(message, memberIds: conversation?.memberIds ?? [])
                 await localStore.updateMessageStatus(id: message.id, status: .sent)
                 if let index = messages.firstIndex(where: { $0.id == message.id }) {
                     messages[index].status = .sent
@@ -357,7 +364,7 @@ final class ChatViewModel: ObservableObject {
             if let index = messages.firstIndex(where: { $0.id == message.id }) {
                 messages[index] = message
             }
-            try await chatRepository.sendMessage(message)
+            try await chatRepository.sendMessage(message, memberIds: conversation?.memberIds ?? [])
             await localStore.updateMessageStatus(id: message.id, status: .sent)
         } catch {
             print("sendMedia error: \(error)")
@@ -394,7 +401,7 @@ final class ChatViewModel: ObservableObject {
         }
 
         do {
-            try await chatRepository.sendMessage(message)
+            try await chatRepository.sendMessage(message, memberIds: conversation?.memberIds ?? [])
             await localStore.updateMessageStatus(id: message.id, status: .sent)
         } catch {
             print("sendMessage error: \(error)")

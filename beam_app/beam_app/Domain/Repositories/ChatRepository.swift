@@ -24,7 +24,11 @@ protocol ChatRepository {
     /// Also used for "leave group" — the leaving user removes themselves.
     func removeMember(conversationId: String, userId: String) async throws
 
-    func sendMessage(_ message: Message) async throws
+    /// `memberIds` is the conversation's current member list, used to increment
+    /// `unreadCounts` for everyone except the sender. Passed in rather than looked up
+    /// server-side so a normal send doesn't cost an extra read — callers already have
+    /// it from the conversation they're sending into (`ChatViewModel.conversation`).
+    func sendMessage(_ message: Message, memberIds: [String]) async throws
 
     func markConversationRead(conversationId: String, userId: String) async throws
 

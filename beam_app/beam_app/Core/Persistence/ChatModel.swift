@@ -12,6 +12,10 @@ final class CachedConversation {
     var title: String?
     var lastMessagePreview: String?
     var updatedAt: Date
+    /// JSON-encoded `[String: Int]` (uid -> unread count) — same "raw storage,
+    /// decode on read" approach as `statusRaw` below, so this stays a plain,
+    /// predictable SwiftData column rather than depending on Dictionary support.
+    var unreadCountsData: Data?
 
     init(_ conversation: Conversation) {
         id = conversation.id
@@ -20,6 +24,7 @@ final class CachedConversation {
         title = conversation.title
         lastMessagePreview = conversation.lastMessagePreview
         updatedAt = conversation.updatedAt
+        unreadCountsData = try? JSONEncoder().encode(conversation.unreadCounts ?? [:])
     }
 
     func update(from conversation: Conversation) {
@@ -28,16 +33,19 @@ final class CachedConversation {
         title = conversation.title
         lastMessagePreview = conversation.lastMessagePreview
         updatedAt = conversation.updatedAt
+        unreadCountsData = try? JSONEncoder().encode(conversation.unreadCounts ?? [:])
     }
 
     func toDomain() -> Conversation {
-        Conversation(
+        let unreadCounts = unreadCountsData.flatMap { try? JSONDecoder().decode([String: Int].self, from: $0) }
+        return Conversation(
             id: id,
             type: ConversationType(rawValue: typeRaw) ?? .direct,
             memberIds: memberIds,
             title: title,
             lastMessagePreview: lastMessagePreview,
-            updatedAt: updatedAt
+            updatedAt: updatedAt,
+            unreadCounts: unreadCounts
         )
     }
 }

@@ -22,7 +22,9 @@ struct ConversationListView: View {
                             ConversationRow(
                                 title: viewModel.displayTitle(for: conversation, currentUserId: appState.currentUser?.id ?? ""),
                                 preview: conversation.lastMessagePreview ?? "No messages yet",
-                                updatedAt: conversation.updatedAt
+                                updatedAt: conversation.updatedAt,
+                                unreadCount: conversation.unreadCount(for: appState.currentUser?.id ?? ""),
+                                isTyping: viewModel.typingConversationIds.contains(conversation.id)
                             )
                         }
                     }
@@ -97,6 +99,8 @@ private struct ConversationRow: View {
     let title: String
     let preview: String
     let updatedAt: Date
+    let unreadCount: Int
+    let isTyping: Bool
 
     var body: some View {
         HStack(spacing: 12) {
@@ -112,17 +116,42 @@ private struct ConversationRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.body.weight(.semibold))
-                Text(preview)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+
+                if isTyping {
+                    Text("typing…")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Color.accentColor)
+                } else {
+                    Text(preview)
+                        .font(.subheadline)
+                        .fontWeight(unreadCount > 0 ? .semibold : .regular)
+                        .foregroundStyle(unreadCount > 0 ? .primary : .secondary)
+                        .lineLimit(1)
+                }
             }
 
             Spacer()
 
-            Text(updatedAt, style: .time)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            VStack(alignment: .trailing, spacing: 6) {
+                Text(updatedAt, style: .time)
+                    .font(.caption)
+                    .foregroundStyle(unreadCount > 0 ? .primary : .secondary)
+                    .fontWeight(unreadCount > 0 ? .semibold : .regular)
+
+                if unreadCount > 0 {
+                    Text(unreadCount > 99 ? "99+" : "\(unreadCount)")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .frame(minWidth: 20)
+                        .background(Color.accentColor, in: Capsule())
+                } else {
+                    // Reserves the badge's vertical space so rows don't jump height
+                    // as unreadCount toggles between 0 and >0.
+                    Color.clear.frame(width: 1, height: 18)
+                }
+            }
         }
         .padding(.vertical, 4)
     }

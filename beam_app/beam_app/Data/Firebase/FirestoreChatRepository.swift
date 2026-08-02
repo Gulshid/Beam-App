@@ -156,7 +156,7 @@ final class FirestoreChatRepository: ChatRepository {
         ])
     }
 
-    func sendMessage(_ message: Message) async throws {
+    func sendMessage(_ message: Message, memberIds: [String]) async throws {
         let messageRef = conversationsCollection
             .document(message.conversationId)
             .collection("messages")
@@ -166,19 +166,42 @@ final class FirestoreChatRepository: ChatRepository {
         sentMessage.status = .sent
         try messageRef.setData(from: sentMessage)
 
-        // Update conversation's preview + sort order.
-        try await conversationsCollection.document(message.conversationId).setData([
+        let conversationRef = conversationsCollection.document(message.conversationId)
+
+        // Fallback for the (rare) case a message is sent before the conversation
+        // snapshot has arrived on this device yet, so `memberIds` came in empty —
+        // fetch it directly rather than silently skipping the unread fan-out.
+        var resolvedMemberIds = memberIds
+        if resolvedMemberIds.isEmpty {
+            let snapshot = try? await conversationRef.getDocument()
+            resolvedMemberIds = (try? snapshot?.data(as: Conversation.self))?.memberIds ?? []
+        }
+
+        var updates: [String: Any] = [
             "lastMessagePreview": previewText(for: sentMessage),
             "updatedAt": Timestamp(date: Date())
-        ], merge: true)
+        ]
+        // Bump the unread badge for everyone but the sender. Client-side counter
+        // rather than a Cloud Function trigger, same free-tier tradeoff as the rest
+        // of this build (see blueprint §2/§7) — each recipient's own device zeroes
+        // their count back out via `markConversationRead` when they open the chat.
+        for uid in resolvedMemberIds where uid != message.senderId {
+            updates["unreadCounts.\(uid)"] = FieldValue.increment(Int64(1))
+        }
+
+        // `updateData` (not `setData(merge:)`) is what actually guarantees the dot in
+        // "unreadCounts.<uid>" is parsed as a nested-field path. `setData(merge:)` can
+        // instead write it as one literal field literally named "unreadCounts.<uid>"
+        // at the document's top level — which is why the badge wasn't showing up
+        // even though lastMessagePreview/updatedAt (no dots) were updating fine.
+        try await conversationRef.updateData(updates)
     }
 
     func markConversationRead(conversationId: String, userId: String) async throws {
-        // Placeholder for Phase 6 read-receipt work; kept here so the protocol
-        // surface is stable for callers built in Phase 1.
-        try await conversationsCollection.document(conversationId).setData([
-            "lastReadBy.\(userId)": Timestamp(date: Date())
-        ], merge: true)
+        try await conversationsCollection.document(conversationId).updateData([
+            "lastReadBy.\(userId)": Timestamp(date: Date()),
+            "unreadCounts.\(userId)": 0
+        ])
     }
 
     func updateMessageStatuses(conversationId: String, messageIds: [String], status: MessageStatus) async throws {
