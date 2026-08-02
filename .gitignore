@@ -33,3 +33,6 @@ Carthage/Build/
 
 # macOS
 .DS_Store
+
+# Cloudinary — real values live only on your machine
+beam_app/beam_app/Data/Cloudinary/CloudinaryConfig.swift
