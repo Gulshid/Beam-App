@@ -30,4 +30,14 @@ protocol ChatRepository {
 
     /// Batch-updates the given messages' status (e.g. sent -> delivered -> read).
     func updateMessageStatuses(conversationId: String, messageIds: [String], status: MessageStatus) async throws
+
+    /// Writes this user's live typing state for the conversation. Called on every
+    /// keystroke (true) and on send/idle-timeout/leave (false) — see
+    /// `ChatViewModel.userIsTyping`.
+    func setTyping(conversationId: String, userId: String, isTyping: Bool) async throws
+
+    /// Live stream of uids currently typing in this conversation, excluding the
+    /// caller. Entries older than a few seconds are treated as stale (covers a
+    /// client that crashed or lost network before it could write `isTyping: false`).
+    func observeTypingUsers(conversationId: String, excluding currentUserId: String) -> AsyncStream<[String]>
 }

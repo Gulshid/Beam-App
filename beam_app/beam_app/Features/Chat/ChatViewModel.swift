@@ -12,6 +12,23 @@ final class ChatViewModel: ObservableObject {
     /// snapshot arrives. Used for the nav title and to decide whether this is a group.
     @Published private(set) var conversation: Conversation?
     @Published private(set) var navigationTitle: String = ""
+    /// Display names of whoever else is currently typing in this conversation
+    /// (already excludes the current user — see `observeTypingUsers`).
+    @Published private(set) var typingUserNames: [String] = []
+
+    /// In-chat message search. `searchMatchIds` is the ordered list of message ids
+    /// (oldest -> newest, matching `messages`) whose text matches `searchQuery`;
+    /// `currentSearchMatchIndex` is which of those the user is currently viewing.
+    @Published var searchQuery = "" {
+        didSet { runSearch() }
+    }
+    @Published private(set) var searchMatchIds: [String] = []
+    @Published private(set) var currentSearchMatchIndex = 0
+
+    var currentSearchMatchId: String? {
+        guard searchMatchIds.indices.contains(currentSearchMatchIndex) else { return nil }
+        return searchMatchIds[currentSearchMatchIndex]
+    }
 
     let conversationId: String
     private let chatRepository: ChatRepository
@@ -20,6 +37,10 @@ final class ChatViewModel: ObservableObject {
     private let localStore: SwiftDataStore
     private var observeTask: Task<Void, Never>?
     private var conversationObserveTask: Task<Void, Never>?
+    private var typingObserveTask: Task<Void, Never>?
+    /// Debounce/idle-timeout for outgoing typing state — see `userIsTyping`.
+    private var stopTypingTask: Task<Void, Never>?
+    private var isCurrentlyTyping = false
     private var reachabilityCancellable: AnyCancellable?
     private var currentUserId: String = ""
     private var wasOffline = false
@@ -66,6 +87,7 @@ final class ChatViewModel: ObservableObject {
         observeTask = Task {
             for await updated in chatRepository.observeMessages(conversationId: conversationId) {
                 self.reconcile(with: updated)
+                self.runSearch()
                 await self.localStore.upsertMessages(updated, conversationId: conversationId)
                 await self.advanceIncomingMessageStatuses(updated)
             }
@@ -77,6 +99,16 @@ final class ChatViewModel: ObservableObject {
                 guard let updated else { continue }
                 self.conversation = updated
                 await self.updateTitleAndMemberNames(updated, currentUserId: currentUserId)
+            }
+        }
+
+        typingObserveTask?.cancel()
+        typingObserveTask = Task {
+            for await typingIds in chatRepository.observeTypingUsers(conversationId: conversationId, excluding: currentUserId) {
+                // Names may not be resolved yet the very first time a peer starts typing
+                // in a direct chat (memberNames backfills from updateTitleAndMemberNames);
+                // fall back to a generic label rather than showing nothing.
+                self.typingUserNames = typingIds.map { self.memberNames[$0] ?? "Someone" }
             }
         }
 
@@ -192,7 +224,95 @@ final class ChatViewModel: ObservableObject {
     func stop() {
         observeTask?.cancel()
         conversationObserveTask?.cancel()
+        typingObserveTask?.cancel()
         reachabilityCancellable?.cancel()
+
+        stopTypingTask?.cancel()
+        if isCurrentlyTyping {
+            isCurrentlyTyping = false
+            let uid = currentUserId
+            let cid = conversationId
+            let repository = chatRepository
+            // Fire-and-forget: the view is going away, so this can't be awaited from
+            // here, but leaving isTyping stuck at true would show "typing..." to the
+            // other participant until the 8s staleness window clears it on its own.
+            Task { try? await repository.setTyping(conversationId: cid, userId: uid, isTyping: false) }
+        }
+    }
+
+    // MARK: - Typing
+
+    /// Call on every keystroke in the composer. Writes `isTyping: true` once (not per
+    /// keystroke) and resets a 4s idle timer that flips it back to `false` if the user
+    /// stops typing without sending.
+    func userIsTyping() {
+        guard !currentUserId.isEmpty else { return }
+
+        if !isCurrentlyTyping {
+            isCurrentlyTyping = true
+            let uid = currentUserId
+            let cid = conversationId
+            Task { try? await self.chatRepository.setTyping(conversationId: cid, userId: uid, isTyping: true) }
+        }
+
+        stopTypingTask?.cancel()
+        stopTypingTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            guard !Task.isCancelled else { return }
+            await self?.clearTyping()
+        }
+    }
+
+    /// Immediately clears typing state — called on send, and on idle-timeout above.
+    func clearTyping() async {
+        stopTypingTask?.cancel()
+        guard isCurrentlyTyping, !currentUserId.isEmpty else { return }
+        isCurrentlyTyping = false
+        try? await chatRepository.setTyping(conversationId: conversationId, userId: currentUserId, isTyping: false)
+    }
+
+    // MARK: - Search
+
+    /// Client-side substring search over the messages already loaded for this chat
+    /// (text messages only — media has no text to match). Good enough for a single
+    /// conversation's history; a cross-conversation/full-history search would need a
+    /// dedicated index (Firestore has no native full-text search — see the search note
+    /// on `UserRepository.searchUsers`).
+    private func runSearch() {
+        let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmed.isEmpty else {
+            searchMatchIds = []
+            currentSearchMatchIndex = 0
+            return
+        }
+
+        let previousMatchId = currentSearchMatchId
+        searchMatchIds = messages
+            .filter { $0.type == .text && ($0.text?.lowercased().contains(trimmed) ?? false) }
+            .map(\.id)
+
+        // Keep the user's place in the results if their current match is still present
+        // (e.g. a new message arrived while they were paging through matches);
+        // otherwise land on the most recent match.
+        if let previousMatchId, let index = searchMatchIds.firstIndex(of: previousMatchId) {
+            currentSearchMatchIndex = index
+        } else {
+            currentSearchMatchIndex = max(0, searchMatchIds.count - 1)
+        }
+    }
+
+    func goToNextMatch() {
+        guard !searchMatchIds.isEmpty else { return }
+        currentSearchMatchIndex = (currentSearchMatchIndex + 1) % searchMatchIds.count
+    }
+
+    func goToPreviousMatch() {
+        guard !searchMatchIds.isEmpty else { return }
+        currentSearchMatchIndex = (currentSearchMatchIndex - 1 + searchMatchIds.count) % searchMatchIds.count
+    }
+
+    func clearSearch() {
+        searchQuery = ""
     }
 
     /// Uploads a picked/recorded photo, video, or voice clip and sends it as a message.
@@ -256,6 +376,7 @@ final class ChatViewModel: ObservableObject {
         draftText = ""
         isSending = true
         defer { isSending = false }
+        await clearTyping()
 
         let message = Message.draft(conversationId: conversationId, senderId: senderId, text: trimmed)
 

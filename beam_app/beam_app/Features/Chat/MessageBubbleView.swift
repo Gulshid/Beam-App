@@ -7,6 +7,11 @@ struct MessageBubbleView: View {
     /// Sender's display name — passed only for group chats, and only rendered above
     /// incoming bubbles (own messages don't need a "you" label).
     var senderName: String? = nil
+    /// Active in-chat search term, if any — matched substrings get highlighted inline.
+    var searchQuery: String = ""
+    /// True when this bubble is the currently-focused search result, so it can be
+    /// picked out from other matches (e.g. "3 of 7") with an outline.
+    var isCurrentSearchMatch: Bool = false
 
     @State private var isPresentingFullScreenImage = false
     @State private var isPresentingVideoPlayer = false
@@ -28,6 +33,12 @@ struct MessageBubbleView: View {
                     .padding(.vertical, 10)
                     .background(bubbleColor, in: RoundedRectangle(cornerRadius: 18))
                     .foregroundStyle(isFromCurrentUser ? .white : .primary)
+                    .overlay {
+                        if isCurrentSearchMatch {
+                            RoundedRectangle(cornerRadius: 18)
+                                .stroke(.yellow, lineWidth: 2)
+                        }
+                    }
 
                 HStack(spacing: 4) {
                     Text(message.createdAt, style: .time)
@@ -48,7 +59,7 @@ struct MessageBubbleView: View {
     private var bubbleContent: some View {
         switch message.type {
         case .text:
-            Text(message.text ?? "")
+            highlightedText(message.text ?? "")
         case .image:
             imageContent
         case .video:
@@ -56,6 +67,24 @@ struct MessageBubbleView: View {
         case .audio:
             audioContent
         }
+    }
+
+    /// Plain `Text` when there's no active search, otherwise an `AttributedString`
+    /// with every case-insensitive occurrence of `searchQuery` given a highlight
+    /// background — same idea as Safari/Mail's "find in page" highlighting.
+    private func highlightedText(_ text: String) -> Text {
+        let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else { return Text(text) }
+
+        var attributed = AttributedString(text)
+        var searchStart = attributed.startIndex
+        while searchStart < attributed.endIndex,
+              let range = attributed[searchStart...].range(of: trimmedQuery, options: .caseInsensitive) {
+            attributed[range].backgroundColor = .yellow.opacity(0.6)
+            attributed[range].foregroundColor = .black
+            searchStart = range.upperBound
+        }
+        return Text(attributed)
     }
 
     @ViewBuilder

@@ -5,6 +5,19 @@ final class FirestoreChatRepository: ChatRepository {
     private let db = Firestore.firestore()
     private var conversationsCollection: CollectionReference { db.collection("conversations") }
 
+    /// Typing docs are short-lived presence pings, not chat history, so they live in
+    /// their own subcollection rather than on the conversation doc itself — that keeps
+    /// every keystroke from rewriting (and re-triggering listeners on) the conversation
+    /// metadata that drives the conversation list.
+    private func typingCollection(_ conversationId: String) -> CollectionReference {
+        conversationsCollection.document(conversationId).collection("typing")
+    }
+
+    /// A typing doc older than this is stale — the writer likely backgrounded the app,
+    /// lost network, or crashed before clearing it — so readers ignore it rather than
+    /// showing "typing..." forever.
+    private static let typingStaleness: TimeInterval = 8
+
     // MARK: - Observing
 
     func observeConversations(forUserId userId: String) -> AsyncStream<[Conversation]> {
@@ -176,6 +189,43 @@ final class FirestoreChatRepository: ChatRepository {
             batch.updateData(["status": status.rawValue], forDocument: messagesCollection.document(id))
         }
         try await batch.commit()
+    }
+
+    // MARK: - Typing
+
+    func setTyping(conversationId: String, userId: String, isTyping: Bool) async throws {
+        try await typingCollection(conversationId).document(userId).setData([
+            "isTyping": isTyping,
+            "updatedAt": Timestamp(date: Date())
+        ], merge: true)
+    }
+
+    func observeTypingUsers(conversationId: String, excluding currentUserId: String) -> AsyncStream<[String]> {
+        AsyncStream { continuation in
+            let listener = typingCollection(conversationId)
+                .addSnapshotListener { snapshot, error in
+                    if let error {
+                        print("observeTypingUsers error: \(error)")
+                        return
+                    }
+                    guard let snapshot else { return }
+                    let now = Date()
+                    let typingIds = snapshot.documents.compactMap { doc -> String? in
+                        guard doc.documentID != currentUserId else { return nil }
+                        let data = doc.data()
+                        guard let isTyping = data["isTyping"] as? Bool, isTyping else { return nil }
+                        guard let timestamp = data["updatedAt"] as? Timestamp,
+                              now.timeIntervalSince(timestamp.dateValue()) < FirestoreChatRepository.typingStaleness
+                        else { return nil }
+                        return doc.documentID
+                    }
+                    continuation.yield(typingIds)
+                }
+
+            continuation.onTermination = { _ in
+                listener.remove()
+            }
+        }
     }
 
     private func previewText(for message: Message) -> String {
