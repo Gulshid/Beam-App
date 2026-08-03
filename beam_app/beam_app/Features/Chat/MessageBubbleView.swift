@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct MessageBubbleView: View {
     let message: Message
@@ -13,8 +14,22 @@ struct MessageBubbleView: View {
     /// picked out from other matches (e.g. "3 of 7") with an outline.
     var isCurrentSearchMatch: Bool = false
 
+    var myReaction: String? = nil
+    var reactionSummary: [(emoji: String, count: Int)] = []
+
+    var onReply: () -> Void = {}
+    var onDeleteForMe: () -> Void = {}
+    var onDeleteForEveryone: () -> Void = {}
+    var onReact: (String) -> Void = { _ in }
+    /// Called when the quoted-reply preview inside this bubble is tapped, with the
+    /// id of the original message it's quoting — the chat view scrolls to it.
+    var onTapQuotedReply: (String) -> Void = { _ in }
+
     @State private var isPresentingFullScreenImage = false
     @State private var isPresentingVideoPlayer = false
+    /// Live horizontal offset while swiping this bubble right-to-reply.
+    @State private var swipeOffset: CGFloat = 0
+    private let swipeToReplyThreshold: CGFloat = 60
 
     var body: some View {
         HStack {
@@ -28,7 +43,15 @@ struct MessageBubbleView: View {
                         .padding(.horizontal, 4)
                 }
 
-                bubbleContent
+                if message.isDeletedForEveryone {
+                    deletedContent
+                } else {
+                    VStack(alignment: isFromCurrentUser ? .trailing : .leading, spacing: 4) {
+                        if let replyId = message.replyToMessageId {
+                            quotedReplyPreview(replyId: replyId)
+                        }
+                        bubbleContent
+                    }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .background(bubbleColor, in: RoundedRectangle(cornerRadius: 18))
@@ -39,6 +62,12 @@ struct MessageBubbleView: View {
                                 .stroke(.yellow, lineWidth: 2)
                         }
                     }
+                    .contextMenu { contextMenuItems }
+                }
+
+                if !reactionSummary.isEmpty {
+                    reactionPill
+                }
 
                 HStack(spacing: 4) {
                     Text(message.createdAt, style: .time)
@@ -50,8 +79,136 @@ struct MessageBubbleView: View {
                     }
                 }
             }
+            .offset(x: swipeOffset)
+            .overlay(alignment: isFromCurrentUser ? .trailing : .leading) {
+                // The little reply arrow that grows in as you drag — mirrors the
+                // WhatsApp swipe-to-reply affordance.
+                if !message.isDeletedForEveryone {
+                    Image(systemName: "arrowshape.turn.up.left.fill")
+                        .foregroundStyle(.secondary)
+                        .opacity(min(1, abs(swipeOffset) / swipeToReplyThreshold))
+                        .offset(x: isFromCurrentUser ? 28 : -28)
+                }
+            }
+            .gesture(
+                DragGesture()
+                    .onChanged { value in
+                        guard !message.isDeletedForEveryone else { return }
+                        // Only allow the "swipe toward the reply arrow" direction —
+                        // right for incoming bubbles, left for your own — so this
+                        // never fights with the ScrollView's vertical scrolling or
+                        // reads as an accidental drag the other way.
+                        let translation = value.translation.width
+                        let allowed = isFromCurrentUser ? min(0, translation) : max(0, translation)
+                        swipeOffset = allowed / 2.2
+                    }
+                    .onEnded { value in
+                        guard !message.isDeletedForEveryone else { return }
+                        if abs(swipeOffset) > swipeToReplyThreshold / 2.2 {
+                            onReply()
+                        }
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            swipeOffset = 0
+                        }
+                    }
+            )
 
             if !isFromCurrentUser { Spacer(minLength: 40) }
+        }
+    }
+
+    @ViewBuilder
+    private var deletedContent: some View {
+        Label("This message was deleted", systemImage: "nosign")
+            .font(.subheadline)
+            .italic()
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18))
+    }
+
+    @ViewBuilder
+    private func quotedReplyPreview(replyId: String) -> some View {
+        Button {
+            onTapQuotedReply(replyId)
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(message.replyPreviewSenderName ?? "Someone")
+                    .font(.caption.weight(.semibold))
+                Text(message.replyPreviewText ?? "")
+                    .font(.caption)
+                    .lineLimit(2)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.black.opacity(isFromCurrentUser ? 0.15 : 0.06), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(alignment: .leading) {
+                Rectangle()
+                    .fill(isFromCurrentUser ? .white : Color.accentColor)
+                    .frame(width: 3)
+                    .clipShape(RoundedRectangle(cornerRadius: 1.5))
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var reactionPill: some View {
+        HStack(spacing: 2) {
+            ForEach(reactionSummary, id: \.emoji) { entry in
+                Text(entry.count > 1 ? "\(entry.emoji)\(entry.count)" : entry.emoji)
+                    .font(.caption2)
+            }
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(Color(.secondarySystemBackground), in: Capsule())
+        .overlay(Capsule().stroke(.separator, lineWidth: 0.5))
+    }
+
+    @ViewBuilder
+    private var contextMenuItems: some View {
+        Button {
+            onReply()
+        } label: {
+            Label("Reply", systemImage: "arrowshape.turn.up.left")
+        }
+
+        if message.type == .text, let text = message.text {
+            Button {
+                UIPasteboard.general.string = text
+            } label: {
+                Label("Copy", systemImage: "doc.on.doc")
+            }
+        }
+
+        Menu {
+            ForEach(MessageReactionPalette.quickReactions, id: \.self) { emoji in
+                Button {
+                    onReact(emoji)
+                } label: {
+                    Text(emoji)
+                }
+            }
+        } label: {
+            Label("React", systemImage: "face.smiling")
+        }
+
+        Button(role: .destructive) {
+            onDeleteForMe()
+        } label: {
+            Label("Delete for me", systemImage: "trash")
+        }
+
+        // Only the sender can pull a message back from everyone else's copy of the
+        // conversation — enforced again server-side in the security rules.
+        if isFromCurrentUser {
+            Button(role: .destructive) {
+                onDeleteForEveryone()
+            } label: {
+                Label("Delete for everyone", systemImage: "trash.fill")
+            }
         }
     }
 

@@ -224,6 +224,45 @@ final class FirestoreChatRepository: ChatRepository {
         try await batch.commit()
     }
 
+    func deleteMessageForMe(conversationId: String, messageId: String, userId: String) async throws {
+        try await conversationsCollection
+            .document(conversationId)
+            .collection("messages")
+            .document(messageId)
+            .updateData([
+                "deletedFor": FieldValue.arrayUnion([userId])
+            ])
+    }
+
+    func deleteMessageForEveryone(conversationId: String, messageId: String) async throws {
+        // Actually clear the content (not just flag it) so a deleted message's
+        // photo/text isn't still sitting there for anyone with direct DB access —
+        // same reasoning WhatsApp/Signal apply to "delete for everyone".
+        try await conversationsCollection
+            .document(conversationId)
+            .collection("messages")
+            .document(messageId)
+            .updateData([
+                "deletedForEveryone": true,
+                "text": FieldValue.delete(),
+                "mediaURL": FieldValue.delete(),
+                "duration": FieldValue.delete()
+            ])
+    }
+
+    func reactToMessage(conversationId: String, messageId: String, viewerId: String, emoji: String) async throws {
+        // Dotted field path so this only ever touches this one viewer's entry —
+        // never overwrites anyone else's reaction — same pattern as
+        // FirestoreStatusRepository.reactToStatus.
+        try await conversationsCollection
+            .document(conversationId)
+            .collection("messages")
+            .document(messageId)
+            .updateData([
+                "reactions.\(viewerId)": emoji
+            ])
+    }
+
     // MARK: - Typing
 
     func setTyping(conversationId: String, userId: String, isTyping: Bool) async throws {

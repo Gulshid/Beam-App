@@ -15,6 +15,9 @@ final class ChatViewModel: ObservableObject {
     /// Display names of whoever else is currently typing in this conversation
     /// (already excludes the current user — see `observeTypingUsers`).
     @Published private(set) var typingUserNames: [String] = []
+    /// The message the composer is currently replying to, if any. Cleared
+    /// automatically once the reply is sent (see sendDraft/sendMedia).
+    @Published var replyingTo: Message?
 
     /// In-chat message search. `searchMatchIds` is the ordered list of message ids
     /// (oldest -> newest, matching `messages`) whose text matches `searchQuery`;
@@ -72,6 +75,64 @@ final class ChatViewModel: ObservableObject {
     func senderName(for message: Message) -> String? {
         guard conversation?.type == .group else { return nil }
         return memberNames[message.senderId]
+    }
+
+    /// Display name for a quoted-reply preview — "You" for the current user's own
+    /// messages, otherwise the same lookup `senderName(for:)` uses.
+    func replySenderLabel(for message: Message, currentUserId: String) -> String {
+        message.senderId == currentUserId ? "You" : (memberNames[message.senderId] ?? "Someone")
+    }
+
+    func beginReply(to message: Message) {
+        replyingTo = message
+    }
+
+    func cancelReply() {
+        replyingTo = nil
+    }
+
+    /// "Delete for me": hides it from this device/account only. Works on any
+    /// message, yours or theirs.
+    func deleteForMe(_ message: Message, currentUserId: String) async {
+        messages.removeAll { $0.id == message.id }
+        do {
+            try await chatRepository.deleteMessageForMe(conversationId: conversationId, messageId: message.id, userId: currentUserId)
+        } catch {
+            print("deleteMessageForMe error: \(error)")
+        }
+    }
+
+    /// "Delete for everyone": only valid for your own messages — the context menu
+    /// in the view already hides this option otherwise, but guard here too in case
+    /// a stale menu is still on screen.
+    func deleteForEveryone(_ message: Message, currentUserId: String) async {
+        guard message.senderId == currentUserId else { return }
+        do {
+            try await chatRepository.deleteMessageForEveryone(conversationId: conversationId, messageId: message.id)
+        } catch {
+            print("deleteMessageForEveryone error: \(error)")
+        }
+    }
+
+    /// No-op reacting to your own message — same rule `StatusViewModel.react`
+    /// applies to your own status.
+    func react(to message: Message, emoji: String, currentUserId: String) {
+        Task {
+            try? await chatRepository.reactToMessage(
+                conversationId: conversationId, messageId: message.id, viewerId: currentUserId, emoji: emoji
+            )
+        }
+    }
+
+    func myReaction(to message: Message, currentUserId: String) -> String? {
+        message.reaction(by: currentUserId)
+    }
+
+    /// Scrolls to and briefly highlights the message a reply is quoting, if it's
+    /// still around (it may have scrolled out of the loaded window, or been
+    /// deleted-for-me on this device — either way there's nothing to jump to).
+    func message(withId id: String) -> Message? {
+        messages.first { $0.id == id }
     }
 
     /// - Parameter currentUserId: needed so we know which messages are "incoming" and can be
@@ -201,12 +262,17 @@ final class ChatViewModel: ObservableObject {
     }
 
     /// Drops anything sent at or before this user's `clearedAt` cutoff (see
-    /// `Conversation.clearedAt`) — applied to every message list before it reaches
-    /// `messages`, the cache, or delivery/read-receipt processing, so a deleted
-    /// chat's old history never resurfaces even after the thread itself reappears.
+    /// `Conversation.clearedAt`), and anything this user has individually
+    /// "deleted for me" (see `Message.deletedFor`) — applied before a message list
+    /// reaches `messages`, the cache, or delivery/read-receipt processing, so
+    /// neither ever resurfaces even after the thread itself reappears.
     private func filterCleared(_ messages: [Message]) -> [Message] {
-        guard let cutoff = clearedAtCutoff else { return messages }
-        return messages.filter { $0.createdAt > cutoff }
+        messages
+            .filter { cutoff in
+                guard let clearedAtCutoff else { return true }
+                return cutoff.createdAt > clearedAtCutoff
+            }
+            .filter { !$0.isDeletedForMe(currentUserId) }
     }
 
     /// Merges the authoritative server snapshot with any optimistic messages that
@@ -369,7 +435,15 @@ final class ChatViewModel: ObservableObject {
             }
         }()
 
-        var message = Message.mediaDraft(conversationId: conversationId, senderId: senderId, type: type, duration: duration)
+        var message = Message.mediaDraft(
+            conversationId: conversationId,
+            senderId: senderId,
+            type: type,
+            duration: duration,
+            replyTo: replyingTo,
+            replySenderName: replyingTo.map { replySenderLabel(for: $0, currentUserId: senderId) }
+        )
+        replyingTo = nil
         messages.append(message)
         await localStore.upsertMessages([message], conversationId: conversationId)
         uploadProgress[message.id] = 0
@@ -420,7 +494,14 @@ final class ChatViewModel: ObservableObject {
         defer { isSending = false }
         await clearTyping()
 
-        let message = Message.draft(conversationId: conversationId, senderId: senderId, text: trimmed)
+        let message = Message.draft(
+            conversationId: conversationId,
+            senderId: senderId,
+            text: trimmed,
+            replyTo: replyingTo,
+            replySenderName: replyingTo.map { replySenderLabel(for: $0, currentUserId: senderId) }
+        )
+        replyingTo = nil
 
         // Optimistic local echo: show it instantly instead of waiting on the realtime
         // listener round-trip. Also persisted to SwiftData right away so it survives an

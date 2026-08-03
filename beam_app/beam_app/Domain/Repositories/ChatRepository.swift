@@ -42,6 +42,18 @@ protocol ChatRepository {
     /// Batch-updates the given messages' status (e.g. sent -> delivered -> read).
     func updateMessageStatuses(conversationId: String, messageIds: [String], status: MessageStatus) async throws
 
+    /// "Delete for me": hides this one message from `userId` only. Nothing else
+    /// about the message, or anyone else's view of it, changes.
+    func deleteMessageForMe(conversationId: String, messageId: String, userId: String) async throws
+
+    /// "Delete for everyone": wipes the message's content server-side (so it's
+    /// gone from every client, not just hidden) and flips `deletedForEveryone`.
+    /// Only the original sender is allowed to do this — enforced in security rules.
+    func deleteMessageForEveryone(conversationId: String, messageId: String) async throws
+
+    /// Sets (or overwrites) `viewerId`'s single emoji reaction on this message.
+    func reactToMessage(conversationId: String, messageId: String, viewerId: String, emoji: String) async throws
+
     /// Writes this user's live typing state for the conversation. Called on every
     /// keystroke (true) and on send/idle-timeout/leave (false) — see
     /// `ChatViewModel.userIsTyping`.

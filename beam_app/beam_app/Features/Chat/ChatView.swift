@@ -13,6 +13,48 @@ struct ChatView: View {
         _viewModel = StateObject(wrappedValue: ChatViewModel(conversationId: conversationId))
     }
 
+    /// Groups a message's raw uid->emoji reactions map into the (emoji, count)
+    /// pairs the bubble's reaction pill displays, most-used emoji first.
+    private func reactionSummary(for message: Message) -> [(emoji: String, count: Int)] {
+        guard let reactions = message.reactions, !reactions.isEmpty else { return [] }
+        var counts: [String: Int] = [:]
+        for emoji in reactions.values { counts[emoji, default: 0] += 1 }
+        return counts.map { (emoji: $0.key, count: $0.value) }.sorted { $0.count > $1.count }
+    }
+
+    /// Shown above the composer once the user has swiped/long-pressed "Reply" on a
+    /// bubble — mirrors the standard "replying to ..." bar with a way to back out.
+    private func replyPreviewBar(_ message: Message) -> some View {
+        HStack(spacing: 8) {
+            Rectangle()
+                .fill(Color.accentColor)
+                .frame(width: 3)
+                .clipShape(RoundedRectangle(cornerRadius: 1.5))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(viewModel.replySenderLabel(for: message, currentUserId: appState.currentUser?.id ?? ""))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+                Text(Message.previewSnippet(for: message))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            Button {
+                viewModel.cancelReply()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color(.secondarySystemBackground))
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             if !reachability.isOnline {
@@ -34,7 +76,25 @@ struct ChatView: View {
                                 uploadProgress: viewModel.uploadProgress[message.id],
                                 senderName: viewModel.senderName(for: message),
                                 searchQuery: viewModel.searchQuery,
-                                isCurrentSearchMatch: message.id == viewModel.currentSearchMatchId
+                                isCurrentSearchMatch: message.id == viewModel.currentSearchMatchId,
+                                myReaction: viewModel.myReaction(to: message, currentUserId: appState.currentUser?.id ?? ""),
+                                reactionSummary: reactionSummary(for: message),
+                                onReply: { viewModel.beginReply(to: message) },
+                                onDeleteForMe: {
+                                    Task { await viewModel.deleteForMe(message, currentUserId: appState.currentUser?.id ?? "") }
+                                },
+                                onDeleteForEveryone: {
+                                    Task { await viewModel.deleteForEveryone(message, currentUserId: appState.currentUser?.id ?? "") }
+                                },
+                                onReact: { emoji in
+                                    viewModel.react(to: message, emoji: emoji, currentUserId: appState.currentUser?.id ?? "")
+                                },
+                                onTapQuotedReply: { replyId in
+                                    guard viewModel.message(withId: replyId) != nil else { return }
+                                    withAnimation {
+                                        proxy.scrollTo(replyId, anchor: .center)
+                                    }
+                                }
                             )
                             .id(message.id)
                         }
@@ -78,6 +138,11 @@ struct ChatView: View {
             }
 
             Divider()
+
+            if let replyingTo = viewModel.replyingTo {
+                replyPreviewBar(replyingTo)
+                Divider()
+            }
 
             if isRecording {
                 VoiceRecorderView(

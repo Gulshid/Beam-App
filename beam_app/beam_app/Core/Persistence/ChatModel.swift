@@ -72,6 +72,15 @@ final class CachedMessage {
     var duration: Double?
     var createdAt: Date
     var statusRaw: String
+    var replyToMessageId: String?
+    var replyPreviewSenderName: String?
+    var replyPreviewText: String?
+    var deletedFor: [String]?
+    var deletedForEveryone: Bool?
+    /// JSON-encoded `[String: String]` (uid -> emoji) — same "raw storage, decode
+    /// on read" approach as `Conversation.unreadCountsData`, so this stays a plain
+    /// SwiftData column instead of depending on Dictionary support.
+    var reactionsData: Data?
 
     init(_ message: Message) {
         id = message.id
@@ -83,6 +92,12 @@ final class CachedMessage {
         duration = message.duration
         createdAt = message.createdAt
         statusRaw = message.status.rawValue
+        replyToMessageId = message.replyToMessageId
+        replyPreviewSenderName = message.replyPreviewSenderName
+        replyPreviewText = message.replyPreviewText
+        deletedFor = message.deletedFor
+        deletedForEveryone = message.deletedForEveryone
+        reactionsData = try? JSONEncoder().encode(message.reactions ?? [:])
     }
 
     func update(from message: Message) {
@@ -91,11 +106,15 @@ final class CachedMessage {
         mediaURL = message.mediaURL
         duration = message.duration
         statusRaw = message.status.rawValue
-        // id / conversationId / senderId / createdAt don't change once a message exists.
+        deletedFor = message.deletedFor
+        deletedForEveryone = message.deletedForEveryone
+        reactionsData = try? JSONEncoder().encode(message.reactions ?? [:])
+        // id / conversationId / senderId / createdAt / replyTo* don't change once a message exists.
     }
 
     func toDomain() -> Message {
-        Message(
+        let reactions = reactionsData.flatMap { try? JSONDecoder().decode([String: String].self, from: $0) }
+        return Message(
             id: id,
             conversationId: conversationId,
             senderId: senderId,
@@ -104,7 +123,13 @@ final class CachedMessage {
             mediaURL: mediaURL,
             duration: duration,
             createdAt: createdAt,
-            status: MessageStatus(rawValue: statusRaw) ?? .sent
+            status: MessageStatus(rawValue: statusRaw) ?? .sent,
+            replyToMessageId: replyToMessageId,
+            replyPreviewSenderName: replyPreviewSenderName,
+            replyPreviewText: replyPreviewText,
+            deletedFor: deletedFor,
+            deletedForEveryone: deletedForEveryone,
+            reactions: (reactions?.isEmpty ?? true) ? nil : reactions
         )
     }
 }
