@@ -39,7 +39,10 @@ final class FirestoreChatRepository: ChatRepository {
                     guard let snapshot else { return }
                     let conversations = snapshot.documents
                         .compactMap { try? $0.data(as: Conversation.self) }
-                        .filter { !($0.deletedFor?.contains(userId) ?? false) }
+                        .filter { conversation in
+                            guard let clearedAt = conversation.clearedAt?[userId] else { return true }
+                            return conversation.updatedAt > clearedAt
+                        }
                         .sorted { $0.updatedAt > $1.updatedAt }
                     continuation.yield(conversations)
                 }
@@ -159,7 +162,7 @@ final class FirestoreChatRepository: ChatRepository {
 
     func deleteConversation(conversationId: String, userId: String) async throws {
         try await conversationsCollection.document(conversationId).updateData([
-            "deletedFor": FieldValue.arrayUnion([userId])
+            "clearedAt.\(userId)": Timestamp(date: Date())
         ])
     }
 
@@ -186,11 +189,7 @@ final class FirestoreChatRepository: ChatRepository {
 
         var updates: [String: Any] = [
             "lastMessagePreview": previewText(for: sentMessage),
-            "updatedAt": Timestamp(date: Date()),
-            // A new message revives the conversation for anyone who'd previously
-            // deleted it (WhatsApp-style) — including the sender, in case they're
-            // the one restarting a thread they'd cleared from their own list.
-            "deletedFor": []
+            "updatedAt": Timestamp(date: Date())
         ]
         // Bump the unread badge for everyone but the sender. Client-side counter
         // rather than a Cloud Function trigger, same free-tier tradeoff as the rest

@@ -24,10 +24,11 @@ protocol ChatRepository {
     /// Also used for "leave group" — the leaving user removes themselves.
     func removeMember(conversationId: String, userId: String) async throws
 
-    /// Hides the conversation from `userId`'s own chat list (WhatsApp-style: the
-    /// conversation and its messages aren't deleted, just filtered out of
-    /// `observeConversations` for this user). If the other member sends a new
-    /// message afterwards, the conversation reappears for them automatically.
+    /// Hides the conversation, and everything sent in it up to now, from `userId`'s
+    /// own view (WhatsApp-style: nothing is actually deleted server-side — see
+    /// `Conversation.clearedAt`). It drops out of `observeConversations` for this
+    /// user immediately, and re-messaging the same person/group later starts a
+    /// clean thread rather than resurfacing the old history.
     func deleteConversation(conversationId: String, userId: String) async throws
 
     /// `memberIds` is the conversation's current member list, used to increment

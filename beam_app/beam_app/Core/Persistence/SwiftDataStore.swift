@@ -43,6 +43,13 @@ actor SwiftDataStore {
         return ((try? modelContext.fetch(descriptor)) ?? []).map { $0.toDomain() }
     }
 
+    /// Single-conversation lookup — used by `ChatViewModel`'s cold-launch cache read
+    /// to know a chat's `clearedAt` cutoff before the Firestore listener reconnects.
+    func fetchCachedConversation(id: String) -> Conversation? {
+        let descriptor = FetchDescriptor<CachedConversation>(predicate: #Predicate { $0.id == id })
+        return (try? modelContext.fetch(descriptor).first)?.toDomain()
+    }
+
     /// Called right after a user deletes a chat, so the row doesn't briefly
     /// reappear from cache on the next cold launch before the server confirms it's
     /// filtered out of `observeConversations`.
@@ -50,6 +57,16 @@ actor SwiftDataStore {
         let descriptor = FetchDescriptor<CachedConversation>(predicate: #Predicate { $0.id == id })
         guard let existing = try? modelContext.fetch(descriptor).first else { return }
         modelContext.delete(existing)
+        try? modelContext.save()
+    }
+
+    /// Called alongside `deleteCachedConversation` so a cold-launch cache read can't
+    /// flash the pre-delete message history before the server's `clearedAt` cutoff
+    /// is known locally either.
+    func deleteCachedMessages(conversationId: String) {
+        let descriptor = FetchDescriptor<CachedMessage>(predicate: #Predicate { $0.conversationId == conversationId })
+        guard let existing = try? modelContext.fetch(descriptor) else { return }
+        for message in existing { modelContext.delete(message) }
         try? modelContext.save()
     }
 

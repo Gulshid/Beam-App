@@ -166,13 +166,14 @@ final class ConversationListViewModel: ObservableObject {
         }
     }
 
-    /// Removes the chat from this user's own list only (see `Conversation.deletedFor`).
+    /// Removes the chat from this user's own list only (see `Conversation.clearedAt`).
     /// Optimistically drops it from `conversations`/local cache first so the row
     /// disappears immediately instead of waiting on the round trip — the live
     /// `observeConversations` listener will confirm (or, on failure, correct) it.
     func deleteConversation(_ conversationId: String, currentUserId: String) async {
         conversations.removeAll { $0.id == conversationId }
         await localStore.deleteCachedConversation(id: conversationId)
+        await localStore.deleteCachedMessages(conversationId: conversationId)
         do {
             try await chatRepository.deleteConversation(conversationId: conversationId, userId: currentUserId)
         } catch {

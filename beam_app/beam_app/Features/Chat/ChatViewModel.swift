@@ -48,6 +48,11 @@ final class ChatViewModel: ObservableObject {
     /// shown above incoming bubbles — direct chats don't need it).
     private var memberNames: [String: String] = [:]
 
+    /// This user's "deleted the chat" cutoff, if any (see `Conversation.clearedAt`).
+    /// Messages sent at or before this are hidden from `messages`/search even once
+    /// the conversation itself reappears after a newer message.
+    private var clearedAtCutoff: Date?
+
     init(
         conversationId: String,
         chatRepository: ChatRepository = FirestoreChatRepository(),
@@ -77,19 +82,23 @@ final class ChatViewModel: ObservableObject {
         // Cold-launch / offline: paint whatever's cached instantly, before Firestore's
         // listener has had a chance to (re)connect.
         Task {
-            let cached = await localStore.fetchCachedMessages(conversationId: conversationId)
-            if messages.isEmpty && !cached.isEmpty {
-                messages = cached
+            if let cachedConversation = await self.localStore.fetchCachedConversation(id: self.conversationId) {
+                self.clearedAtCutoff = cachedConversation.clearedAt?[currentUserId]
+            }
+            let cached = await self.localStore.fetchCachedMessages(conversationId: self.conversationId)
+            if self.messages.isEmpty && !cached.isEmpty {
+                self.messages = self.filterCleared(cached)
             }
         }
 
         observeTask?.cancel()
         observeTask = Task {
             for await updated in chatRepository.observeMessages(conversationId: conversationId) {
-                self.reconcile(with: updated)
+                let visible = self.filterCleared(updated)
+                self.reconcile(with: visible)
                 self.runSearch()
-                await self.localStore.upsertMessages(updated, conversationId: conversationId)
-                await self.advanceIncomingMessageStatuses(updated)
+                await self.localStore.upsertMessages(visible, conversationId: conversationId)
+                await self.advanceIncomingMessageStatuses(visible)
                 // This screen is open and rendering the conversation, so it's read —
                 // zero the unread badge back to 0 for this device's user. Same idea as
                 // advanceIncomingMessageStatuses above, just at the conversation level
@@ -105,6 +114,15 @@ final class ChatViewModel: ObservableObject {
             for await updated in chatRepository.observeConversation(conversationId: conversationId) {
                 guard let updated else { continue }
                 self.conversation = updated
+                let newCutoff = updated.clearedAt?[currentUserId]
+                if newCutoff != self.clearedAtCutoff {
+                    // The cutoff just changed (e.g. this device deleted the chat from
+                    // another session) — re-apply it to whatever's already on screen
+                    // rather than waiting on the next message snapshot.
+                    self.clearedAtCutoff = newCutoff
+                    self.messages = self.filterCleared(self.messages)
+                    self.runSearch()
+                }
                 await self.updateTitleAndMemberNames(updated, currentUserId: currentUserId)
             }
         }
@@ -180,6 +198,15 @@ final class ChatViewModel: ObservableObject {
                 navigationTitle = "Conversation"
             }
         }
+    }
+
+    /// Drops anything sent at or before this user's `clearedAt` cutoff (see
+    /// `Conversation.clearedAt`) — applied to every message list before it reaches
+    /// `messages`, the cache, or delivery/read-receipt processing, so a deleted
+    /// chat's old history never resurfaces even after the thread itself reappears.
+    private func filterCleared(_ messages: [Message]) -> [Message] {
+        guard let cutoff = clearedAtCutoff else { return messages }
+        return messages.filter { $0.createdAt > cutoff }
     }
 
     /// Merges the authoritative server snapshot with any optimistic messages that

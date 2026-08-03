@@ -16,6 +16,10 @@ final class CachedConversation {
     /// decode on read" approach as `statusRaw` below, so this stays a plain,
     /// predictable SwiftData column rather than depending on Dictionary support.
     var unreadCountsData: Data?
+    /// JSON-encoded `[String: Date]` mirror of `Conversation.clearedAt` — cached too
+    /// so `ChatViewModel`'s cold-launch cache read (before the listener reconnects)
+    /// still knows to hide pre-delete messages instead of flashing them briefly.
+    var clearedAtData: Data?
 
     init(_ conversation: Conversation) {
         id = conversation.id
@@ -25,6 +29,7 @@ final class CachedConversation {
         lastMessagePreview = conversation.lastMessagePreview
         updatedAt = conversation.updatedAt
         unreadCountsData = try? JSONEncoder().encode(conversation.unreadCounts ?? [:])
+        clearedAtData = try? JSONEncoder().encode(conversation.clearedAt ?? [:])
     }
 
     func update(from conversation: Conversation) {
@@ -34,10 +39,12 @@ final class CachedConversation {
         lastMessagePreview = conversation.lastMessagePreview
         updatedAt = conversation.updatedAt
         unreadCountsData = try? JSONEncoder().encode(conversation.unreadCounts ?? [:])
+        clearedAtData = try? JSONEncoder().encode(conversation.clearedAt ?? [:])
     }
 
     func toDomain() -> Conversation {
         let unreadCounts = unreadCountsData.flatMap { try? JSONDecoder().decode([String: Int].self, from: $0) }
+        let clearedAt = clearedAtData.flatMap { try? JSONDecoder().decode([String: Date].self, from: $0) }
         return Conversation(
             id: id,
             type: ConversationType(rawValue: typeRaw) ?? .direct,
@@ -45,7 +52,8 @@ final class CachedConversation {
             title: title,
             lastMessagePreview: lastMessagePreview,
             updatedAt: updatedAt,
-            unreadCounts: unreadCounts
+            unreadCounts: unreadCounts,
+            clearedAt: clearedAt
         )
     }
 }
