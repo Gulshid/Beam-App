@@ -14,6 +14,7 @@ struct StatusAvatarRing: View {
 
     let initial: String
     let ringState: RingState
+    var photoURL: String? = nil
     var size: CGFloat = 50
 
     var body: some View {
@@ -25,11 +26,32 @@ struct StatusAvatarRing: View {
                     .padding(ringState == .none ? 0 : 3)
             }
             .overlay {
-                Text(initial)
-                    .font(.headline)
-                    .foregroundStyle(.tint)
+                avatarContent
+                    .clipShape(Circle())
+                    .padding(ringState == .none ? 0 : 3)
             }
             .frame(width: size, height: size)
+    }
+
+    @ViewBuilder
+    private var avatarContent: some View {
+        if let photoURL, let url = URL(string: photoURL) {
+            AsyncImage(url: url) { phase in
+                if let image = phase.image {
+                    image.resizable().scaledToFill()
+                } else {
+                    initialLabel
+                }
+            }
+        } else {
+            initialLabel
+        }
+    }
+
+    private var initialLabel: some View {
+        Text(initial)
+            .font(.headline)
+            .foregroundStyle(.tint)
     }
 
     private var ringColor: Color {

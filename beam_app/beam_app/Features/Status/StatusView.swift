@@ -35,7 +35,8 @@ struct StatusView: View {
                                 StatusRowView(
                                     name: viewModel.displayName(for: group.userId),
                                     latestAt: group.latest?.createdAt ?? Date(),
-                                    isUnviewed: group.hasUnviewed(for: currentUserId)
+                                    isUnviewed: group.hasUnviewed(for: currentUserId),
+                                    photoURL: viewModel.photoURL(for: group.userId)
                                 )
                             }
                             .buttonStyle(.plain)
@@ -108,7 +109,8 @@ struct StatusView: View {
             ZStack(alignment: .bottomTrailing) {
                 StatusAvatarRing(
                     initial: (appState.currentUser?.displayName ?? "?").prefix(1).uppercased(),
-                    ringState: viewModel.myStatuses.isEmpty ? .none : .viewed
+                    ringState: viewModel.myStatuses.isEmpty ? .none : .viewed,
+                    photoURL: appState.currentUser?.photoURL
                 )
 
                 Button {

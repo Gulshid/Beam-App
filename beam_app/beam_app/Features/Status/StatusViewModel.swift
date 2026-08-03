@@ -5,6 +5,7 @@ final class StatusViewModel: ObservableObject {
     @Published private(set) var myStatuses: [Status] = []
     @Published private(set) var contactGroups: [StatusGroup] = []
     @Published private(set) var participantNames: [String: String] = [:]
+    @Published private(set) var participantPhotoURLs: [String: String] = [:]
     @Published var isPosting = false
     @Published var postErrorMessage: String?
 
@@ -92,12 +93,17 @@ final class StatusViewModel: ObservableObject {
         for uid in missing {
             if let user = try? await userRepository.fetchUser(uid: uid) {
                 participantNames[uid] = user.displayName
+                participantPhotoURLs[uid] = user.photoURL
             }
         }
     }
 
     func displayName(for userId: String) -> String {
         participantNames[userId] ?? "..."
+    }
+
+    func photoURL(for userId: String) -> String? {
+        participantPhotoURLs[userId]
     }
 
     // MARK: - Posting
