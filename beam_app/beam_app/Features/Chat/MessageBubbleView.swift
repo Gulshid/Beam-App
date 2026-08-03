@@ -126,6 +126,18 @@ struct MessageBubbleView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18))
+            // The placeholder itself had no contextMenu, so once a message was
+            // deleted for everyone there was no way left to also clear it out of
+            // your own view — it would sit there as "This message was deleted"
+            // forever. Reply/copy/react don't make sense here (there's no content
+            // left), but "delete for me" still does.
+            .contextMenu {
+                Button(role: .destructive) {
+                    onDeleteForMe()
+                } label: {
+                    Label("Delete for me", systemImage: "trash")
+                }
+            }
     }
 
     @ViewBuilder
@@ -145,10 +157,17 @@ struct MessageBubbleView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(.black.opacity(isFromCurrentUser ? 0.15 : 0.06), in: RoundedRectangle(cornerRadius: 8))
             .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(isFromCurrentUser ? .white : Color.accentColor)
-                    .frame(width: 3)
-                    .clipShape(RoundedRectangle(cornerRadius: 1.5))
+                // GeometryReader pins this to the label's *actual* measured height.
+                // A bare Rectangle() here has no intrinsic height, so — since this
+                // bubble sits inside a ScrollView, which proposes unbounded height
+                // along the scroll axis — it was expanding to fill all remaining
+                // scroll space instead of just hugging the quoted-preview row.
+                GeometryReader { geo in
+                    Rectangle()
+                        .fill(isFromCurrentUser ? .white : Color.accentColor)
+                        .frame(width: 3, height: geo.size.height)
+                        .clipShape(RoundedRectangle(cornerRadius: 1.5))
+                }
             }
         }
         .buttonStyle(.plain)

@@ -26,9 +26,14 @@ struct ChatView: View {
     /// bubble — mirrors the standard "replying to ..." bar with a way to back out.
     private func replyPreviewBar(_ message: Message) -> some View {
         HStack(spacing: 8) {
+            // Fixed height, not just fixed width — a bare Rectangle() has no
+            // intrinsic height, so it was expanding to fill flexible vertical
+            // space in the outer VStack (it sits alongside the ScrollView, and
+            // both were greedily competing for the remaining height). Pinning
+            // it to a concrete height keeps it just as tall as the text beside it.
             Rectangle()
                 .fill(Color.accentColor)
-                .frame(width: 3)
+                .frame(width: 3, height: 32)
                 .clipShape(RoundedRectangle(cornerRadius: 1.5))
 
             VStack(alignment: .leading, spacing: 2) {
