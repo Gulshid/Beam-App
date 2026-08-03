@@ -25,6 +25,10 @@ struct MessageBubbleView: View {
     /// id of the original message it's quoting — the chat view scrolls to it.
     var onTapQuotedReply: (String) -> Void = { _ in }
 
+    /// Set from Settings > Chats > Message Text Size. Only scales the text bubble's
+    /// own font — captions on media bubbles stay at their fixed sizes.
+    @AppStorage(SettingsKeys.messageFontScale) private var messageFontScale: Double = 1.0
+
     @State private var isPresentingFullScreenImage = false
     @State private var isPresentingVideoPlayer = false
     /// Live horizontal offset while swiping this bubble right-to-reply.
@@ -236,6 +240,7 @@ struct MessageBubbleView: View {
         switch message.type {
         case .text:
             highlightedText(message.text ?? "")
+                .font(.system(size: 17 * messageFontScale))
         case .image:
             imageContent
         case .video:

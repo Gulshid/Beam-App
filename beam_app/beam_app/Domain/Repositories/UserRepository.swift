@@ -11,6 +11,13 @@ protocol UserRepository {
     /// before FirebaseAuth's own profile update finishes committing.
     func updateDisplayName(uid: String, displayName: String) async throws
 
+    /// Writes a new avatar URL (already uploaded to Cloudinary by the caller).
+    func updatePhotoURL(uid: String, photoURL: String) async throws
+
+    /// Permanently removes the user's Firestore profile document. Called as part of
+    /// account deletion, after the FirebaseAuth user itself has been deleted.
+    func deleteUserProfile(uid: String) async throws
+
     /// For "add to chat" / "new conversation" search.
     /// `excluding` is the current user's uid so they never see themselves in results.
     func searchUsers(matching query: String, excluding currentUserId: String?) async throws -> [AppUser]

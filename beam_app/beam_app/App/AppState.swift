@@ -62,6 +62,18 @@ final class AppState: ObservableObject {
         currentUser = nil
     }
 
+    /// Deletes the signed-in user's FirebaseAuth account and their Firestore profile
+    /// document. FirebaseAuth requires a "recent" sign-in for this; if that's not the
+    /// case it throws `.requiresRecentLogin`, which callers should surface as
+    /// "please sign out and sign back in, then try again" rather than a generic error.
+    func deleteAccount() async throws {
+        guard let firebaseUser = Auth.auth().currentUser else { return }
+        let uid = firebaseUser.uid
+        try await firebaseUser.delete()
+        try? await userRepository.deleteUserProfile(uid: uid)
+        currentUser = nil
+    }
+
     deinit {
         if let authHandle {
             Auth.auth().removeStateDidChangeListener(authHandle)

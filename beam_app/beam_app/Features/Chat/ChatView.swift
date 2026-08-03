@@ -9,6 +9,14 @@ struct ChatView: View {
     @State private var isRecording = false
     @State private var isSearching = false
 
+    /// Set from Settings > Chats > Wallpaper. Empty string means "use the default
+    /// system background" rather than any particular color.
+    @AppStorage(SettingsKeys.chatWallpaperHex) private var chatWallpaperHex = ""
+
+    private var wallpaperBackground: Color {
+        chatWallpaperHex.isEmpty ? Color(.systemBackground) : Color(hex: chatWallpaperHex).opacity(0.18)
+    }
+
     init(conversationId: String) {
         _viewModel = StateObject(wrappedValue: ChatViewModel(conversationId: conversationId))
     }
@@ -133,6 +141,7 @@ struct ChatView: View {
                         proxy.scrollTo(matchId, anchor: .center)
                     }
                 }
+                .background(wallpaperBackground)
             }
 
             if isSearching {

@@ -56,4 +56,12 @@ final class FirestoreUserRepository: UserRepository {
     func updateFCMToken(uid: String, token: String) async throws {
         try await usersCollection.document(uid).setData(["fcmToken": token], merge: true)
     }
+
+    func updatePhotoURL(uid: String, photoURL: String) async throws {
+        try await usersCollection.document(uid).setData(["photoURL": photoURL], merge: true)
+    }
+
+    func deleteUserProfile(uid: String) async throws {
+        try await usersCollection.document(uid).delete()
+    }
 }

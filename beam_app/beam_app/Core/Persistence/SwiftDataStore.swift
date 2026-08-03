@@ -111,4 +111,19 @@ actor SwiftDataStore {
         existing.statusRaw = status.rawValue
         try? modelContext.save()
     }
+
+    // MARK: - Maintenance
+
+    /// Wipes every locally-cached conversation and message. Used by the "Clear local
+    /// cache" action in Settings — purely a storage-reclaiming operation, since
+    /// Firestore listeners repopulate everything from the server on next launch.
+    func clearAllCache() {
+        let conversations = (try? modelContext.fetch(FetchDescriptor<CachedConversation>())) ?? []
+        for conversation in conversations { modelContext.delete(conversation) }
+
+        let messages = (try? modelContext.fetch(FetchDescriptor<CachedMessage>())) ?? []
+        for message in messages { modelContext.delete(message) }
+
+        try? modelContext.save()
+    }
 }
