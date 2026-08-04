@@ -8,6 +8,7 @@ import SwiftUI
 struct MainTabView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var unreadBadgeStore = UnreadBadgeStore()
+    @StateObject private var tabBarVisibility = TabBarVisibility()
     @State private var selectedTab: AppTab = .chats
 
     var body: some View {
@@ -26,10 +27,18 @@ struct MainTabView: View {
         }
         .toolbar(.hidden, for: .tabBar)
         .safeAreaInset(edge: .bottom) {
-            CustomTabBar(selection: $selectedTab, unreadCount: unreadBadgeStore.totalUnreadCount)
-                .padding(.bottom, 6)
+            // Omitted entirely (rather than just made invisible) while a
+            // screen like ChatView asks for it to be hidden, so that screen
+            // gets the full height back for its own bottom-anchored UI
+            // instead of leaving a dead gap where the bar used to be.
+            if !tabBarVisibility.isHidden {
+                CustomTabBar(selection: $selectedTab, unreadCount: unreadBadgeStore.totalUnreadCount)
+                    .padding(.bottom, 6)
+            }
         }
         .environmentObject(unreadBadgeStore)
+        .environmentObject(tabBarVisibility)
+        .animation(.easeInOut(duration: 0.25), value: tabBarVisibility.isHidden)
         .task(id: appState.currentUser?.id) {
             if let uid = appState.currentUser?.id {
                 unreadBadgeStore.start(currentUserId: uid)

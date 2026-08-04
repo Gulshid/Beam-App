@@ -4,9 +4,6 @@ struct RootView: View {
     @EnvironmentObject private var appState: AppState
     @AppStorage(SettingsKeys.appearance) private var appearanceRaw = AppAppearance.system.rawValue
 
-    /// Splash stays up until BOTH the session has resolved AND this minimum
-    /// time has elapsed, so the animation is never cut short or skipped on
-    /// a fast, cached launch — but never blocks longer than necessary either.
     private static let minimumSplashDuration: TimeInterval = 2.2
 
     @State private var minimumDurationElapsed = false

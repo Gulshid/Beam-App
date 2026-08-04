@@ -7,6 +7,7 @@ struct ConversationListView: View {
     }
 
     @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var tabBarVisibility: TabBarVisibility
     @StateObject private var viewModel = ConversationListViewModel()
     @State private var showingNewChat = false
     @State private var showingNewGroup = false
@@ -153,6 +154,15 @@ struct ConversationListView: View {
             }
         }
         .onDisappear { viewModel.stop() }
+        // Hide the floating tab bar the moment a chat (or the group-info
+        // screen behind it) is pushed, so it doesn't float on top of that
+        // screen's own bottom-anchored UI — chiefly ChatView's message
+        // composer, which this was overlapping. Restored the moment the
+        // stack pops back to the conversation list.
+        .onChange(of: navigationPath.count) { _, count in
+            tabBarVisibility.isHidden = count > 0
+        }
+        .onDisappear { tabBarVisibility.isHidden = false }
     }
 
     /// WhatsApp-style "All / Unread" pill selector, pinned above the list.
@@ -200,4 +210,5 @@ struct ConversationListView: View {
 #Preview {
     ConversationListView()
         .environmentObject(AppState())
+        .environmentObject(TabBarVisibility())
 }
