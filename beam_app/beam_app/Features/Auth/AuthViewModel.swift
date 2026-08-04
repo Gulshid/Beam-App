@@ -7,6 +7,7 @@ final class AuthViewModel: ObservableObject {
     @Published var password = ""
     @Published var displayName = ""
     @Published var errorMessage: String?
+    @Published var infoMessage: String?
     @Published var isLoading = false
 
     private let userRepository: UserRepository
@@ -17,6 +18,7 @@ final class AuthViewModel: ObservableObject {
 
     func signIn() async {
         errorMessage = nil
+        infoMessage = nil
         isLoading = true
         defer { isLoading = false }
 
@@ -27,8 +29,33 @@ final class AuthViewModel: ObservableObject {
         }
     }
 
+    /// Sends a Firebase password-reset email for the current `email` field.
+    /// Sets `infoMessage` on success so the UI can show gentle confirmation
+    /// rather than silently doing nothing.
+    func sendPasswordReset() async {
+        errorMessage = nil
+        infoMessage = nil
+
+        let trimmed = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            errorMessage = "Enter your email above first, then tap \"Forgot password?\"."
+            return
+        }
+
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            try await Auth.auth().sendPasswordReset(withEmail: trimmed)
+            infoMessage = "Password reset email sent to \(trimmed)."
+        } catch {
+            errorMessage = friendlyMessage(for: error)
+        }
+    }
+
     func signUp() async {
         errorMessage = nil
+        infoMessage = nil
 
         guard !displayName.trimmingCharacters(in: .whitespaces).isEmpty else {
             errorMessage = "Please enter a display name."
